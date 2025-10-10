@@ -14,10 +14,13 @@ Generate simple draw.io ERD diagrams directly from a directory of PostgreSQL-sty
 - Auto-layered layout groups related tables (following foreign-key levels) with generous spacing; tweak via `--per-row` if needed.
 
 ## Installation
-No packaging step is required. Use the repository directly with Python 3.9+.
+Ensure Python 3.9+ is available; no packaging step is required.
 
+## Environment Setup
 ```bash
-python3 --version
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
 ## Usage
