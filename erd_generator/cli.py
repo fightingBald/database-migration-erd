@@ -8,7 +8,6 @@ import xml.etree.ElementTree as ET
 
 from .drawio import build_drawio
 from .layout import LayoutConfig
-from .png_renderer import render_png
 from .sql_parser import load_schema_from_migrations
 
 
@@ -52,15 +51,6 @@ def run_cli(args: argparse.Namespace) -> int:
     tree.write(args.out, encoding="utf-8", xml_declaration=False)
     print(f"Diagram written to {args.out}")
 
-    if args.out_png:
-        render_png(
-            schema,
-            args.out_png,
-            show_types=args.show_types,
-            layout_config=layout_config,
-            embedded_xml=xml_string,
-        )
-        print(f"PNG snapshot written to {args.out_png}")
 
     return 0
 
