@@ -288,23 +288,21 @@ def rename_column_in_schema(schema: Schema, table_name: str, old_name: str, new_
                 )
 
 
-def describe_indexes(table: Table) -> List[str]:
+def describe_table_notes(table: Table) -> List[str]:
     lines: List[str] = []
     if table.primary_key:
         pk_cols = ", ".join(sorted(col.upper() for col in table.primary_key))
         label = table.primary_key_name.upper() if table.primary_key_name else "PK"
         lines.append(f"{label}: ({pk_cols})")
+    for fk in table.foreign_keys:
+        local_cols = ", ".join(col.upper() for col in fk.columns)
+        target_cols = ", ".join(col.upper() for col in fk.ref_columns)
+        lines.append(f"FK {local_cols} -> {fk.ref_table.upper()}.{target_cols}")
     for index in table.indexes:
         cols = ", ".join(index.columns)
-        prefix = f"{index.name.upper()}: " if index.name else ""
-        status = []
-        if index.unique:
-            status.append("UNIQUE")
-        if index.method:
-            status.append(index.method.upper())
-        if index.uses_expression():
-            status.append("EXPRESSION")
-        status_prefix = f"{' '.join(status)} " if status else ""
-        where = f" WHERE {index.where}" if index.where else ""
-        lines.append(f"{prefix}{status_prefix}({cols}){where}")
+        prefix = "Unique " if index.unique else ""
+        line = f"{prefix}Index on [{cols}]"
+        if index.where:
+            line += f" where {index.where}"
+        lines.append(line)
     return lines

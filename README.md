@@ -1,3 +1,8 @@
+## Summary
+- Generate draw.io ERDs directly from PostgreSQL-style migrations.
+- Minimal, self-contained SQL parser (no DB connection required).
+- Graph-aware layout and constraint annotations aid visual inspection.
+
 # db_migraton_diagram_generator
 
 Generate simple draw.io ERD diagrams directly from a directory of PostgreSQL-style migration SQL files.
@@ -5,7 +10,7 @@ Generate simple draw.io ERD diagrams directly from a directory of PostgreSQL-sty
 ## Features
 - Parses `CREATE TABLE` (including inline/table-level PRIMARY KEY and FOREIGN KEY definitions) plus common `ALTER TABLE` statements (add/drop/alter columns, add/drop constraints, rename columns/tables/constraints).
 - Normalises identifiers so cross-file foreign keys resolve reliably.
-- Produces draw.io XML using the built-in `table` shape with PK markers, optional data types, and an index summary note beneath each table (highlighting unique/partial/expression indexes). Optionally emits a lightweight PNG snapshot for quick previews.
+- Produces draw.io XML using the built-in `table` shape with PK markers, optional data types, and a constraint note beneath each table (primary key, foreign keys, indexes).
 - Auto-layered layout groups related tables (following foreign-key levels) with generous spacing; tweak via `--per-row` if needed.
 
 ## Installation
@@ -20,7 +25,6 @@ python3 --version
 python3 gen_drawio_erd_table.py \
   --migrations ./db/migration \
   --out ./schema.drawio \
-  --out-png ./schema.png \
   --show-types \
   --per-row 0
 ```
@@ -28,11 +32,18 @@ python3 gen_drawio_erd_table.py \
 Arguments:
 - `--migrations`: root directory containing migration SQL files.
 - `--out`: where the `.drawio` document will be written.
-- `--out-png`: optional PNG snapshot rendered by the built-in rasteriser.
 - `--show-types`: include column data types in the table rows.
 - `--per-row`: optional layout tuning; tables per row (default `0` = automatic based on graph).
 
 The generated `schema.drawio` can be opened with [diagrams.net](https://app.diagrams.net/) or draw.io desktop.
+
+## Repository Structure
+- `gen_drawio_erd_table.py`: thin CLI shim that delegates to the library modules.
+- `erd_generator/sql_parser.py`: extracts table/column/constraint metadata from PostgreSQL-style migrations.
+- `erd_generator/schema.py`: shared data classes plus helpers for mutating schema state.
+- `erd_generator/layout.py`: computes graph-aware table placement and note positioning.
+- `erd_generator/drawio.py`: renders the collected schema into draw.io XML elements.
+- `db/migration/`: sample migrations covering the supported DDL patterns.
 
 ## Supported SQL Snippets
 The parser targets a practical subset of PostgreSQL DDL with predictable formatting. Currently handled constructs include:

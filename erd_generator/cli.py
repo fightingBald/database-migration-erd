@@ -22,10 +22,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Tables per row (0 = auto based on graph, default: 0)",
     )
-    parser.add_argument(
-        "--out-png",
-        help="Optional path to a PNG snapshot rendered with a lightweight built-in renderer",
-    )
     return parser
 
 
@@ -42,8 +38,6 @@ def run_cli(args: argparse.Namespace) -> int:
         ET.indent(tree, space="  ")  # type: ignore[attr-defined]
     except AttributeError:
         pass
-
-    xml_string = ET.tostring(tree.getroot(), encoding="utf-8").decode("utf-8")
 
     output_dir = os.path.dirname(os.path.abspath(args.out))
     if output_dir:

@@ -7,7 +7,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List
 
-from .schema import Schema, Table, describe_indexes
+from .schema import Schema, Table, describe_table_notes
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ def calculate_table_height(table: Table, config: LayoutConfig) -> float:
 
 
 def calculate_note_height(table: Table, config: LayoutConfig) -> tuple[List[str], float]:
-    lines = describe_indexes(table)
+    lines = describe_table_notes(table)
     if not lines:
         return [], 0.0
     content_height = len(lines) * config.index_note_line_height
