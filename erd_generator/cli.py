@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 
 from .drawio import build_drawio
 from .layout import LayoutConfig
+from .png_renderer import render_png
 from .sql_parser import load_schema_from_migrations
 
 
@@ -19,8 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--per-row",
         type=int,
-        default=3,
-        help="How many tables to place per row in the layout (default: 3)",
+        default=0,
+        help="Tables per row (0 = auto based on graph, default: 0)",
+    )
+    parser.add_argument(
+        "--out-png",
+        help="Optional path to a PNG snapshot rendered with a lightweight built-in renderer",
     )
     return parser
 
@@ -39,11 +44,24 @@ def run_cli(args: argparse.Namespace) -> int:
     except AttributeError:
         pass
 
+    xml_string = ET.tostring(tree.getroot(), encoding="utf-8").decode("utf-8")
+
     output_dir = os.path.dirname(os.path.abspath(args.out))
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     tree.write(args.out, encoding="utf-8", xml_declaration=False)
     print(f"Diagram written to {args.out}")
+
+    if args.out_png:
+        render_png(
+            schema,
+            args.out_png,
+            show_types=args.show_types,
+            layout_config=layout_config,
+            embedded_xml=xml_string,
+        )
+        print(f"PNG snapshot written to {args.out_png}")
+
     return 0
 
 

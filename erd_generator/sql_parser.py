@@ -4,11 +4,12 @@ from __future__ import annotations
 import glob
 import os
 import re
-from typing import List
+from typing import List, Optional, Tuple
 
 from .schema import (
     Column,
     ForeignKey,
+    Index,
     Schema,
     Table,
     rename_column_in_schema,
@@ -29,6 +30,22 @@ ALTER_TABLE_RE = re.compile(
     r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<table>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s+(?P<actions>.*)",
     re.IGNORECASE | re.DOTALL,
 )
+CREATE_INDEX_RE = re.compile(
+    r"CREATE\s+(?P<unique>UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s+ON\s+(?:ONLY\s+)?"
+    r"(?P<table>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s*(?P<rest>.*)",
+    re.IGNORECASE | re.DOTALL,
+)
+DROP_INDEX_RE = re.compile(
+    r"DROP\s+INDEX(?:\s+CONCURRENTLY)?\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)"
+    r"(?:\s+(?:CASCADE|RESTRICT))?",
+    re.IGNORECASE,
+)
+ALTER_INDEX_RE = re.compile(
+    r"ALTER\s+INDEX\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s+"
+    r"RENAME\s+TO\s+(?P<new>\"[^\"]+\"|[a-zA-Z_][\w.]*)",
+    re.IGNORECASE,
+)
 PRIMARY_KEY_RE = re.compile(r"PRIMARY\s+KEY\s*\((?P<cols>[^)]+)\)", re.IGNORECASE | re.DOTALL)
 TABLE_FOREIGN_KEY_RE = re.compile(
     r"FOREIGN\s+KEY\s*\((?P<src>[^)]+)\)\s*REFERENCES\s+"
@@ -43,6 +60,14 @@ COLUMN_INLINE_FOREIGN_KEY_RE = re.compile(
 COLUMN_INLINE_PRIMARY_KEY_RE = re.compile(
     r"(?:CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+)?PRIMARY\s+KEY",
     re.IGNORECASE,
+)
+COLUMN_INLINE_UNIQUE_RE = re.compile(
+    r"(?:CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+)?UNIQUE\b",
+    re.IGNORECASE,
+)
+UNIQUE_CONSTRAINT_RE = re.compile(
+    r"UNIQUE\s*\((?P<cols>[^)]+)\)",
+    re.IGNORECASE | re.DOTALL,
 )
 ADD_COLUMN_RE = re.compile(
     r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<definition>.+)",
@@ -89,6 +114,11 @@ RENAME_TABLE_RE = re.compile(
 CONSTRAINT_NAME_RE = re.compile(
     r"CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+(?P<rest>.*)",
     re.IGNORECASE | re.DOTALL,
+)
+SIMPLE_INDEX_COLUMN_RE = re.compile(
+    r"^\s*(?:\"(?P<quoted>[^\"]+)\"|(?P<unquoted>[a-zA-Z_][\w]*))"
+    r"(?:\s+(?:ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?\s*$",
+    re.IGNORECASE,
 )
 COMMENT_LINE_RE = re.compile(r"--.*?$", re.MULTILINE)
 COMMENT_BLOCK_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -205,7 +235,18 @@ def normalize_identifier(identifier: str) -> str:
     return ".".join(normalized)
 
 
-def extract_constraint_name(definition: str) -> tuple[str | None, str]:
+def format_index_column(raw: str) -> Tuple[str, Optional[str]]:
+    text = raw.strip()
+    match = SIMPLE_INDEX_COLUMN_RE.match(text)
+    if match:
+        column = match.group("quoted") or match.group("unquoted") or ""
+        normalized = column.lower()
+        display = column.upper()
+        return display, normalized
+    return text, None
+
+
+def extract_constraint_name(definition: str) -> Tuple[Optional[str], str]:
     definition = definition.strip()
     match = CONSTRAINT_NAME_RE.match(definition)
     if match:
@@ -214,6 +255,8 @@ def extract_constraint_name(definition: str) -> tuple[str | None, str]:
         return name, rest
     return None, definition
 
+
+# Remaining functions follow...
 
 def parse_column_definition(item: str, table: Table) -> None:
     item = item.strip()
@@ -262,6 +305,26 @@ def parse_column_definition(item: str, table: Table) -> None:
             constraint_name=constraint_name,
         )
 
+    unique_match = COLUMN_INLINE_UNIQUE_RE.search(rest)
+    if unique_match:
+        constraint_name = (
+            normalize_identifier(unique_match.group("name"))
+            if unique_match.group("name")
+            else None
+        )
+        display, normalized = format_index_column(column.name)
+        table.add_index(
+            Index(
+                name=constraint_name,
+                columns=(display,),
+                expression_columns=tuple([display] if normalized is None else []),
+                column_names=(normalized,),
+                unique=True,
+            ),
+            constraint_name=constraint_name,
+            constraint_type="unique",
+        )
+
 
 def parse_table_constraint(item: str, table: Table) -> None:
     constraint_name, definition = extract_constraint_name(item)
@@ -278,6 +341,27 @@ def parse_table_constraint(item: str, table: Table) -> None:
         table.add_foreign_key(
             ForeignKey(columns=src_cols, ref_table=ref_table, ref_columns=ref_cols),
             constraint_name=constraint_name,
+        )
+
+    unique_match = UNIQUE_CONSTRAINT_RE.search(definition)
+    if unique_match:
+        cols = split_identifier_list(unique_match.group("cols"))
+        displays: List[str] = []
+        normalized_cols: List[Optional[str]] = []
+        for col in cols:
+            display, normalized = format_index_column(col)
+            displays.append(display)
+            normalized_cols.append(normalized)
+        table.add_index(
+            Index(
+                name=constraint_name,
+                columns=tuple(displays),
+                expression_columns=tuple(display for display, norm in zip(displays, normalized_cols) if norm is None),
+                column_names=tuple(normalized_cols),
+                unique=True,
+            ),
+            constraint_name=constraint_name,
+            constraint_type="unique",
         )
 
 
@@ -297,6 +381,7 @@ def parse_create_table_statement(statement: str, schema: Schema) -> None:
     table.columns.clear()
     table.primary_key.clear()
     table.foreign_keys.clear()
+    table.indexes.clear()
     table.constraint_types.clear()
     table.primary_key_name = None
 
@@ -308,7 +393,107 @@ def parse_create_table_statement(statement: str, schema: Schema) -> None:
     table.sync_primary_key_flags()
 
 
-def apply_alter_table_action(action: str, table: Table, schema: Schema) -> str | None:
+def extract_index_components(rest: str) -> Tuple[str, Optional[str], Optional[str]]:
+    working = rest.strip()
+    method = None
+    if working.upper().startswith("USING"):
+        parts = working.split(None, 2)
+        if len(parts) >= 2:
+            method = parts[1]
+            working = parts[2] if len(parts) == 3 else ""
+    paren_start = working.find("(")
+    if paren_start == -1:
+        return working, method, None
+    depth = 0
+    end_index = -1
+    for idx in range(paren_start, len(working)):
+        ch = working[idx]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                end_index = idx
+                break
+    if end_index == -1:
+        return working, method, None
+    columns_raw = working[paren_start + 1 : end_index]
+    tail = working[end_index + 1 :].strip()
+    where_clause = None
+    where_match = re.search(r"\bWHERE\b", tail, re.IGNORECASE)
+    if where_match:
+        where_clause = tail[where_match.end() :].strip().rstrip(";")
+    return columns_raw, method, where_clause
+
+
+def add_index_from_definition(
+    table: Table,
+    index_name: Optional[str],
+    columns_raw: str,
+    unique: bool,
+    where_clause: Optional[str],
+    method: Optional[str],
+) -> None:
+    columns_list = split_top_level_commas(columns_raw)
+    displays: List[str] = []
+    normalized_cols: List[Optional[str]] = []
+    expression_cols: List[str] = []
+    for col in columns_list:
+        display, normalized = format_index_column(col)
+        displays.append(display)
+        normalized_cols.append(normalized)
+        if normalized is None:
+            expression_cols.append(display)
+    index = Index(
+        name=normalize_identifier(index_name) if index_name else None,
+        columns=tuple(displays),
+        expression_columns=tuple(expression_cols),
+        column_names=tuple(normalized_cols),
+        unique=unique,
+        method=method.lower() if method else None,
+        where=where_clause.strip() if where_clause else None,
+    )
+    table.add_index(index)
+
+
+def parse_create_index_statement(statement: str, schema: Schema) -> None:
+    stmt = statement.strip()
+    stmt_with_semicolon = stmt if stmt.endswith(";") else f"{stmt};"
+    match = CREATE_INDEX_RE.match(stmt_with_semicolon)
+    if not match:
+        return
+    table_name = normalize_identifier(match.group("table"))
+    table = schema.setdefault(table_name, Table(name=table_name))
+    columns_raw, method, where_clause = extract_index_components(match.group("rest"))
+    unique = bool(match.group("unique"))
+    index_name = match.group("name")
+    add_index_from_definition(table, index_name, columns_raw, unique, where_clause, method)
+
+
+def parse_drop_index_statement(statement: str, schema: Schema) -> None:
+    stmt = statement.strip()
+    match = DROP_INDEX_RE.match(stmt)
+    if not match:
+        return
+    index_name = normalize_identifier(match.group("name"))
+    for table in schema.values():
+        if table.drop_index(index_name):
+            break
+
+
+def parse_alter_index_statement(statement: str, schema: Schema) -> None:
+    stmt = statement.strip()
+    match = ALTER_INDEX_RE.match(stmt)
+    if not match:
+        return
+    index_name = normalize_identifier(match.group("name"))
+    new_name = normalize_identifier(match.group("new"))
+    for table in schema.values():
+        if table.rename_index(index_name, new_name):
+            break
+
+
+def apply_alter_table_action(action: str, table: Table, schema: Schema) -> Optional[str]:
     action = action.strip()
     if not action:
         return None
@@ -435,12 +620,11 @@ def parse_drop_table_statement(statement: str, schema: Schema) -> None:
     if table_name in schema:
         schema.pop(table_name, None)
         for table in schema.values():
+            removed_fk_names = [fk.name for fk in table.foreign_keys if fk.ref_table == table_name]
             table.foreign_keys = [fk for fk in table.foreign_keys if fk.ref_table != table_name]
-            table.constraint_types = {
-                name: ctype
-                for name, ctype in table.constraint_types.items()
-                if not (ctype == "foreign_key" and any((fk.name or "").lower() == name for fk in table.foreign_keys))
-            }
+            for name in removed_fk_names:
+                if name:
+                    table.constraint_types.pop(name.lower(), None)
 
 
 def parse_schema_from_sql(sql: str, schema: Schema) -> None:
@@ -453,6 +637,12 @@ def parse_schema_from_sql(sql: str, schema: Schema) -> None:
             parse_alter_table_statement(statement, schema)
         elif upper_stmt.startswith("DROP TABLE"):
             parse_drop_table_statement(statement, schema)
+        elif upper_stmt.startswith("CREATE INDEX") or upper_stmt.startswith("CREATE UNIQUE INDEX"):
+            parse_create_index_statement(statement, schema)
+        elif upper_stmt.startswith("DROP INDEX"):
+            parse_drop_index_statement(statement, schema)
+        elif upper_stmt.startswith("ALTER INDEX"):
+            parse_alter_index_statement(statement, schema)
 
 
 def load_schema_from_migrations(path: str) -> Schema:

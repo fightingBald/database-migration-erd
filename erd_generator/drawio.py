@@ -42,6 +42,10 @@ EDGE_STYLE = (
     "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;"
     "jettySize=auto;html=1;endArrow=block;strokeColor=#999999;"
 )
+NOTE_STYLE = (
+    "text;html=1;align=left;verticalAlign=top;spacingLeft=4;"
+    "spacingTop=4;strokeColor=none;fillColor=none;fontSize=12;"
+)
 
 
 def _render_table_label(table: Table) -> str:
@@ -217,6 +221,34 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
                     "width": f"{layout.width - 30:.2f}",
                     "height": f"{config.row_height:.2f}",
                     "as": "alternateBounds",
+                },
+            )
+
+        if layout.note_lines:
+            margin = config.index_note_margin
+            content_height = layout.note_height - margin
+            note_value = "<br/>".join(escape(line) for line in layout.note_lines)
+            note_id = ids.next()
+            note_cell = ET.SubElement(
+                root,
+                "mxCell",
+                {
+                    "id": note_id,
+                    "value": note_value,
+                    "style": NOTE_STYLE,
+                    "vertex": "1",
+                    "parent": "1",
+                },
+            )
+            ET.SubElement(
+                note_cell,
+                "mxGeometry",
+                {
+                    "x": f"{layout.x:.2f}",
+                    "y": f"{layout.y + layout.height + margin:.2f}",
+                    "width": f"{layout.width:.2f}",
+                    "height": f"{max(content_height, 1.0):.2f}",
+                    "as": "geometry",
                 },
             )
 
