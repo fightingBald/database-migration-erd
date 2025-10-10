@@ -12,6 +12,7 @@ Generate simple draw.io ERD diagrams directly from a directory of PostgreSQL-sty
 - Normalises identifiers so cross-file foreign keys resolve reliably.
 - Produces draw.io XML using the built-in `table` shape with PK markers, optional data types, and a constraint note beneath each table (primary key, foreign keys, indexes).
 - Auto-layered layout groups related tables (following foreign-key levels) with generous spacing; tweak via `--per-row` if needed.
+- Built on top of [sqlglot](https://github.com/tobymao/sqlglot) for robust PostgreSQL DDL parsing and [NetworkX](https://networkx.org/) for graph-aware layout ordering.
 
 ## Installation
 Ensure Python 3.9+ is available; no packaging step is required.

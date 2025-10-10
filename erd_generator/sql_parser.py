@@ -1,10 +1,14 @@
-"""Minimal SQL parser to pull schema information from migration files."""
+"""SQL parsing helpers backed by sqlglot."""
 from __future__ import annotations
 
 import glob
 import os
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError
 
 from .schema import (
     Column,
@@ -16,368 +20,257 @@ from .schema import (
     rename_table,
 )
 
-
-CREATE_TABLE_RE = re.compile(
-    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s*\((?P<body>.*)\)",
-    re.IGNORECASE | re.DOTALL,
-)
-DROP_TABLE_RE = re.compile(
-    r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)"
-    r"(?:\s+(?:CASCADE|RESTRICT))?",
-    re.IGNORECASE,
-)
-ALTER_TABLE_RE = re.compile(
-    r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<table>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s+(?P<actions>.*)",
-    re.IGNORECASE | re.DOTALL,
-)
-CREATE_INDEX_RE = re.compile(
-    r"CREATE\s+(?P<unique>UNIQUE\s+)?INDEX(?:\s+CONCURRENTLY)?\s+(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s+ON\s+(?:ONLY\s+)?"
-    r"(?P<table>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s*(?P<rest>.*)",
-    re.IGNORECASE | re.DOTALL,
-)
-DROP_INDEX_RE = re.compile(
-    r"DROP\s+INDEX(?:\s+CONCURRENTLY)?\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)"
-    r"(?:\s+(?:CASCADE|RESTRICT))?",
-    re.IGNORECASE,
-)
-ALTER_INDEX_RE = re.compile(
-    r"ALTER\s+INDEX\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s+"
-    r"RENAME\s+TO\s+(?P<new>\"[^\"]+\"|[a-zA-Z_][\w.]*)",
-    re.IGNORECASE,
-)
-PRIMARY_KEY_RE = re.compile(r"PRIMARY\s+KEY\s*\((?P<cols>[^)]+)\)", re.IGNORECASE | re.DOTALL)
-TABLE_FOREIGN_KEY_RE = re.compile(
-    r"FOREIGN\s+KEY\s*\((?P<src>[^)]+)\)\s*REFERENCES\s+"
-    r"(?P<ref_table>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s*\((?P<ref>[^)]+)\)",
-    re.IGNORECASE | re.DOTALL,
-)
-COLUMN_INLINE_FOREIGN_KEY_RE = re.compile(
-    r"(?:CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+)?REFERENCES\s+"
-    r"(?P<table>\"[^\"]+\"|[a-zA-Z_][\w.]*)\s*\((?P<cols>[^)]+)\)",
-    re.IGNORECASE | re.DOTALL,
-)
-COLUMN_INLINE_PRIMARY_KEY_RE = re.compile(
-    r"(?:CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+)?PRIMARY\s+KEY",
-    re.IGNORECASE,
-)
-COLUMN_INLINE_UNIQUE_RE = re.compile(
-    r"(?:CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+)?UNIQUE\b",
-    re.IGNORECASE,
-)
-UNIQUE_CONSTRAINT_RE = re.compile(
-    r"UNIQUE\s*\((?P<cols>[^)]+)\)",
-    re.IGNORECASE | re.DOTALL,
-)
-ADD_COLUMN_RE = re.compile(
-    r"ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<definition>.+)",
-    re.IGNORECASE | re.DOTALL,
-)
-DROP_COLUMN_RE = re.compile(
-    r"DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)"
-    r"(?:\s+(?:CASCADE|RESTRICT))?",
-    re.IGNORECASE,
-)
-ALTER_COLUMN_SET_NOT_NULL_RE = re.compile(
-    r"ALTER\s+COLUMN\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+SET\s+NOT\s+NULL",
-    re.IGNORECASE,
-)
-ALTER_COLUMN_DROP_NOT_NULL_RE = re.compile(
-    r"ALTER\s+COLUMN\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+DROP\s+NOT\s+NULL",
-    re.IGNORECASE,
-)
-ALTER_COLUMN_TYPE_RE = re.compile(
-    r"ALTER\s+COLUMN\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+TYPE\s+(?P<type>.+)",
-    re.IGNORECASE | re.DOTALL,
-)
-ADD_CONSTRAINT_RE = re.compile(
-    r"ADD\s+CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+(?P<definition>.+)",
-    re.IGNORECASE | re.DOTALL,
-)
-DROP_CONSTRAINT_RE = re.compile(
-    r"DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)"
-    r"(?:\s+(?:CASCADE|RESTRICT))?",
-    re.IGNORECASE,
-)
-RENAME_COLUMN_RE = re.compile(
-    r"RENAME\s+COLUMN\s+(?P<old>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+TO\s+(?P<new>\"[^\"]+\"|[a-zA-Z_][\w]*)",
-    re.IGNORECASE,
-)
 RENAME_CONSTRAINT_RE = re.compile(
-    r"RENAME\s+CONSTRAINT\s+(?P<old>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+TO\s+(?P<new>\"[^\"]+\"|[a-zA-Z_][\w]*)",
-    re.IGNORECASE,
+    r"""
+    ^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<table>"[^"]+"|\S+)\s+
+    RENAME\s+CONSTRAINT\s+(?P<old>"[^"]+"|\S+)\s+TO\s+(?P<new>"[^"]+"|\S+)\s*;?\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
-RENAME_TABLE_RE = re.compile(
-    r"RENAME\s+TO\s+(?P<new>\"[^\"]+\"|[a-zA-Z_][\w.]*)",
-    re.IGNORECASE,
-)
-CONSTRAINT_NAME_RE = re.compile(
-    r"CONSTRAINT\s+(?P<name>\"[^\"]+\"|[a-zA-Z_][\w]*)\s+(?P<rest>.*)",
-    re.IGNORECASE | re.DOTALL,
-)
-SIMPLE_INDEX_COLUMN_RE = re.compile(
-    r"^\s*(?:\"(?P<quoted>[^\"]+)\"|(?P<unquoted>[a-zA-Z_][\w]*))"
-    r"(?:\s+(?:ASC|DESC))?(?:\s+NULLS\s+(?:FIRST|LAST))?\s*$",
-    re.IGNORECASE,
-)
-COMMENT_LINE_RE = re.compile(r"--.*?$", re.MULTILINE)
-COMMENT_BLOCK_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
-STOP_WORDS = {
-    "PRIMARY",
-    "REFERENCES",
-    "NOT",
-    "NULL",
-    "DEFAULT",
-    "UNIQUE",
-    "CHECK",
-    "CONSTRAINT",
-    "GENERATED",
-    "AS",
-}
 
 
-def strip_comments(sql: str) -> str:
-    sql = COMMENT_BLOCK_RE.sub("", sql)
-    return COMMENT_LINE_RE.sub("", sql)
+# ---------------------------------------------------------------------------
+# Normalisation helpers
 
 
-def split_top_level_commas(text: str) -> List[str]:
-    parts: List[str] = []
-    buf: List[str] = []
-    depth = 0
-    in_single = False
-    in_double = False
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == "'" and not in_double:
-            if in_single and i + 1 < len(text) and text[i + 1] == "'":
-                buf.append("''")
-                i += 2
-                continue
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            if in_double and i + 1 < len(text) and text[i + 1] == '"':
-                buf.append('""')
-                i += 2
-                continue
-            in_double = not in_double
-        elif ch == "(" and not in_single and not in_double:
-            depth += 1
-        elif ch == ")" and not in_single and not in_double and depth > 0:
-            depth -= 1
-        if ch == "," and depth == 0 and not in_single and not in_double:
-            part = "".join(buf).strip()
-            if part:
-                parts.append(part)
-            buf = []
-            i += 1
+def _normalize_identifier(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return text
+    parts = []
+    for chunk in text.split("."):
+        chunk = chunk.strip()
+        if not chunk:
             continue
-        buf.append(ch)
-        i += 1
-    tail = "".join(buf).strip()
-    if tail:
-        parts.append(tail)
-    return parts
-
-
-def split_sql_statements(sql: str) -> List[str]:
-    statements: List[str] = []
-    buf: List[str] = []
-    in_single = False
-    in_double = False
-    i = 0
-    while i < len(sql):
-        ch = sql[i]
-        if ch == "'" and not in_double:
-            if in_single and i + 1 < len(sql) and sql[i + 1] == "'":
-                buf.append("''")
-                i += 2
-                continue
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            if in_double and i + 1 < len(sql) and sql[i + 1] == '"':
-                buf.append('""')
-                i += 2
-                continue
-            in_double = not in_double
-        if ch == ";" and not in_single and not in_double:
-            statement = "".join(buf).strip()
-            if statement:
-                statements.append(statement)
-            buf = []
-            i += 1
-            continue
-        buf.append(ch)
-        i += 1
-    tail = "".join(buf).strip()
-    if tail:
-        statements.append(tail)
-    return statements
-
-
-def split_identifier_list(raw: str) -> List[str]:
-    return [normalize_identifier(chunk) for chunk in raw.split(",") if chunk.strip()]
-
-
-def normalize_identifier(identifier: str) -> str:
-    identifier = identifier.strip()
-    if not identifier:
-        return identifier
-    parts = identifier.split(".")
-    normalized = []
-    for part in parts:
-        part = part.strip()
-        if part.startswith('"') and part.endswith('"'):
-            normalized.append(part[1:-1])
+        if chunk.startswith('"') and chunk.endswith('"'):
+            parts.append(chunk[1:-1])
         else:
-            normalized.append(part.lower())
-    return ".".join(normalized)
+            parts.append(chunk.lower())
+    return ".".join(parts)
 
 
-def format_index_column(raw: str) -> Tuple[str, Optional[str]]:
-    text = raw.strip()
-    match = SIMPLE_INDEX_COLUMN_RE.match(text)
-    if match:
-        column = match.group("quoted") or match.group("unquoted") or ""
-        normalized = column.lower()
-        display = column.upper()
+def _identifier_name(node: exp.Expression | str | None) -> str:
+    if node is None:
+        return ""
+    if isinstance(node, exp.Identifier):
+        value = node.this or ""
+        quoted = bool(node.args.get("quoted"))
+        return value if quoted else value.lower()
+    if isinstance(node, exp.Table):
+        parts = []
+        if node.catalog:
+            parts.append(_identifier_name(node.catalog))
+        if node.db:
+            parts.append(_identifier_name(node.db))
+        parts.append(_identifier_name(node.this))
+        return ".".join(part for part in parts if part)
+    if isinstance(node, exp.Schema):
+        return _identifier_name(node.this)
+    if isinstance(node, exp.Column):
+        return _identifier_name(node.this)
+    if isinstance(node, exp.Var):
+        return _identifier_name(node.this)
+    if isinstance(node, exp.Literal):
+        literal = node.this or ""
+        return literal.lower() if not node.args.get("is_string") else literal
+    if isinstance(node, str):
+        return _normalize_identifier(node)
+    return _normalize_identifier(node.sql(dialect="postgres"))
+
+
+def _table_name(node: exp.Expression | str | None) -> str:
+    name = _identifier_name(node)
+    return name
+
+
+def _column_name(node: exp.Expression | str | None) -> str:
+    return _identifier_name(node)
+
+
+def _expression_sql(node: Optional[exp.Expression]) -> str:
+    if node is None:
+        return ""
+    return node.sql(dialect="postgres")
+
+
+# ---------------------------------------------------------------------------
+# Index formatting helpers
+
+
+def _format_index_expression(expression: exp.Expression) -> Tuple[str, Optional[str]]:
+    if isinstance(expression, exp.Column):
+        column = _column_name(expression.this)
+        return column.upper(), column
+    if isinstance(expression, exp.Identifier):
+        column = _identifier_name(expression)
+        return column.upper(), column
+    display = expression.sql(dialect="postgres")
+    return display, None
+
+
+def _format_ordered_expression(ordered: exp.Expression) -> Tuple[str, Optional[str]]:
+    if isinstance(ordered, exp.Ordered):
+        display, normalized = _format_index_expression(ordered.this)
+        if ordered.args.get("desc"):
+            display = f"{display} DESC"
+        if ordered.args.get("nulls_first"):
+            display = f"{display} NULLS FIRST"
         return display, normalized
-    return text, None
+    return _format_index_expression(ordered)
 
 
-def extract_constraint_name(definition: str) -> Tuple[Optional[str], str]:
-    definition = definition.strip()
-    match = CONSTRAINT_NAME_RE.match(definition)
-    if match:
-        name = normalize_identifier(match.group("name"))
-        rest = match.group("rest").strip()
-        return name, rest
-    return None, definition
+# ---------------------------------------------------------------------------
+# Constraint ingestion
 
 
-# Remaining functions follow...
+def _apply_primary_key(table: Table, pk_expr: exp.PrimaryKey, constraint_name: Optional[str]) -> None:
+    columns: List[str] = []
+    for item in pk_expr.expressions or []:
+        if isinstance(item, exp.Ordered):
+            target = item.this
+        else:
+            target = item
+        columns.append(_column_name(target))
+    table.set_primary_key(columns, constraint_name)
 
-def parse_column_definition(item: str, table: Table) -> None:
-    item = item.strip()
-    if not item or item.upper().startswith(("CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK")):
-        return
 
-    match = re.match(r"^(\"[^\"]+\"|[a-zA-Z_][\w]*)\s+(?P<rest>.*)$", item, re.DOTALL)
-    if not match:
-        return
+def _apply_foreign_key(table: Table, fk_expr: exp.ForeignKey, constraint_name: Optional[str]) -> None:
+    local_columns = tuple(_column_name(col) for col in fk_expr.expressions or [])
+    ref_table = ""
+    ref_columns: Tuple[str, ...] = ()
+    reference = fk_expr.args.get("reference")
+    if isinstance(reference, exp.Reference):
+        schema_expr = reference.this
+        if isinstance(schema_expr, exp.Schema):
+            ref_table = _table_name(schema_expr.this)
+            ref_columns = tuple(_column_name(col) for col in schema_expr.expressions or [])
+        else:
+            ref_table = _table_name(schema_expr)
+            ref_columns = tuple(_column_name(col) for col in reference.expressions or [])
+    table.add_foreign_key(
+        ForeignKey(columns=local_columns, ref_table=ref_table, ref_columns=ref_columns),
+        constraint_name=constraint_name,
+    )
 
-    raw_name = match.group(1)
-    rest = match.group("rest").strip()
-    name = normalize_identifier(raw_name)
 
-    column = Column(name=name)
-    tokens = rest.split()
-    type_parts: List[str] = []
-    for token in tokens:
-        if token.upper() in STOP_WORDS:
-            break
-        type_parts.append(token)
-    column.data_type = " ".join(type_parts)
-    column.nullable = "NOT NULL" not in rest.upper()
-    column.is_primary_key = "PRIMARY KEY" in rest.upper()
+def _apply_unique_constraint(table: Table, unique_expr: exp.UniqueColumnConstraint, constraint_name: Optional[str]) -> None:
+    if isinstance(unique_expr.this, exp.Schema):
+        column_expressions = unique_expr.this.expressions or []
+    else:
+        column_expressions = unique_expr.expressions or []
+    displays: List[str] = []
+    column_names: List[Optional[str]] = []
+    expression_columns: List[str] = []
+    for item in column_expressions or []:
+        display, normalized = _format_index_expression(item)
+        displays.append(display)
+        column_names.append(normalized)
+        if normalized is None:
+            expression_columns.append(display)
+    table.add_index(
+        Index(
+            name=constraint_name,
+            columns=tuple(displays),
+            column_names=tuple(column_names),
+            expression_columns=tuple(expression_columns),
+            unique=True,
+        ),
+        constraint_name=constraint_name,
+        constraint_type="unique",
+    )
 
+
+def _apply_constraint(table: Table, constraint: exp.Constraint) -> None:
+    constraint_name = _identifier_name(constraint.this)
+    for item in constraint.expressions or []:
+        if isinstance(item, exp.PrimaryKey):
+            _apply_primary_key(table, item, constraint_name)
+        elif isinstance(item, exp.ForeignKey):
+            _apply_foreign_key(table, item, constraint_name)
+        elif isinstance(item, exp.UniqueColumnConstraint):
+            _apply_unique_constraint(table, item, constraint_name)
+
+
+def _apply_column_constraints(table: Table, column: Column, constraints: Sequence[exp.ColumnConstraint]) -> None:
+    pk_constraint_name: Optional[str] = None
+    for constraint in constraints:
+        constraint_name = _identifier_name(constraint.this)
+        kind = constraint.args.get("kind")
+        if isinstance(kind, exp.PrimaryKeyColumnConstraint):
+            column.is_primary_key = True
+            if constraint_name:
+                pk_constraint_name = constraint_name
+        elif isinstance(kind, exp.NotNullColumnConstraint):
+            column.nullable = False
+        elif isinstance(kind, exp.UniqueColumnConstraint):
+            display = column.name.upper()
+            table.add_index(
+                Index(
+                    name=constraint_name,
+                    columns=(display,),
+                    column_names=(column.name,),
+                    expression_columns=tuple(),
+                    unique=True,
+                ),
+                constraint_name=constraint_name,
+                constraint_type="unique",
+            )
+        elif isinstance(kind, exp.Reference):
+            schema_expr = kind.this
+            ref_columns: Tuple[str, ...] = ()
+            ref_table = ""
+            if isinstance(schema_expr, exp.Schema):
+                ref_table = _table_name(schema_expr.this)
+                ref_columns = tuple(_column_name(col) for col in schema_expr.expressions or [])
+            elif schema_expr is not None:
+                ref_table = _table_name(schema_expr)
+            table.add_foreign_key(
+                ForeignKey(
+                    columns=(column.name,),
+                    ref_table=ref_table,
+                    ref_columns=ref_columns,
+                ),
+                constraint_name=constraint_name,
+            )
+    if column.is_primary_key and pk_constraint_name:
+        table.set_primary_key(table.primary_key, pk_constraint_name)
+
+
+def _ingest_column_definition(table: Table, column_def: exp.ColumnDef) -> None:
+    column = Column(name=_column_name(column_def.this))
+    data_type = column_def.args.get("kind")
+    column.data_type = _expression_sql(data_type)
+    column.nullable = True
+    column.is_primary_key = False
+    constraints = column_def.args.get("constraints") or []
+    _apply_column_constraints(table, column, constraints)
     table.add_column(column)
 
-    if column.is_primary_key:
-        pk_constraint_match = COLUMN_INLINE_PRIMARY_KEY_RE.search(rest)
-        pk_constraint = (
-            normalize_identifier(pk_constraint_match.group("name"))
-            if pk_constraint_match and pk_constraint_match.group("name")
-            else None
-        )
-        if pk_constraint:
-            table.set_primary_key(table.primary_key, constraint_name=pk_constraint)
 
-    fk_match = COLUMN_INLINE_FOREIGN_KEY_RE.search(rest)
-    if fk_match:
-        fk_name = fk_match.group("name")
-        constraint_name = normalize_identifier(fk_name) if fk_name else None
-        ref_table = normalize_identifier(fk_match.group("table"))
-        ref_cols = tuple(split_identifier_list(fk_match.group("cols")))
-        table.add_foreign_key(
-            ForeignKey(columns=(column.name,), ref_table=ref_table, ref_columns=ref_cols),
-            constraint_name=constraint_name,
-        )
-
-    unique_match = COLUMN_INLINE_UNIQUE_RE.search(rest)
-    if unique_match:
-        constraint_name = (
-            normalize_identifier(unique_match.group("name"))
-            if unique_match.group("name")
-            else None
-        )
-        display, normalized = format_index_column(column.name)
-        table.add_index(
-            Index(
-                name=constraint_name,
-                columns=(display,),
-                expression_columns=tuple([display] if normalized is None else []),
-                column_names=(normalized,),
-                unique=True,
-            ),
-            constraint_name=constraint_name,
-            constraint_type="unique",
-        )
+def _ingest_table_element(table: Table, element: exp.Expression) -> None:
+    if isinstance(element, exp.ColumnDef):
+        _ingest_column_definition(table, element)
+    elif isinstance(element, exp.Constraint):
+        _apply_constraint(table, element)
+    elif isinstance(element, exp.PrimaryKey):
+        _apply_primary_key(table, element, None)
+    elif isinstance(element, exp.ForeignKey):
+        _apply_foreign_key(table, element, None)
+    elif isinstance(element, exp.UniqueColumnConstraint):
+        _apply_unique_constraint(table, element, None)
 
 
-def parse_table_constraint(item: str, table: Table) -> None:
-    constraint_name, definition = extract_constraint_name(item)
-
-    pk_match = PRIMARY_KEY_RE.search(definition)
-    if pk_match:
-        table.set_primary_key(split_identifier_list(pk_match.group("cols")), constraint_name)
-
-    fk_match = TABLE_FOREIGN_KEY_RE.search(definition)
-    if fk_match:
-        src_cols = tuple(split_identifier_list(fk_match.group("src")))
-        ref_table = normalize_identifier(fk_match.group("ref_table"))
-        ref_cols = tuple(split_identifier_list(fk_match.group("ref")))
-        table.add_foreign_key(
-            ForeignKey(columns=src_cols, ref_table=ref_table, ref_columns=ref_cols),
-            constraint_name=constraint_name,
-        )
-
-    unique_match = UNIQUE_CONSTRAINT_RE.search(definition)
-    if unique_match:
-        cols = split_identifier_list(unique_match.group("cols"))
-        displays: List[str] = []
-        normalized_cols: List[Optional[str]] = []
-        for col in cols:
-            display, normalized = format_index_column(col)
-            displays.append(display)
-            normalized_cols.append(normalized)
-        table.add_index(
-            Index(
-                name=constraint_name,
-                columns=tuple(displays),
-                expression_columns=tuple(display for display, norm in zip(displays, normalized_cols) if norm is None),
-                column_names=tuple(normalized_cols),
-                unique=True,
-            ),
-            constraint_name=constraint_name,
-            constraint_type="unique",
-        )
+# ---------------------------------------------------------------------------
+# Statement handlers
 
 
-def parse_create_table_statement(statement: str, schema: Schema) -> None:
-    stmt = statement.strip()
-    stmt_with_semicolon = stmt if stmt.endswith(";") else f"{stmt};"
-    match = CREATE_TABLE_RE.search(stmt_with_semicolon)
-    if not match:
+def _handle_create_table(statement: exp.Create, schema: Schema) -> None:
+    schema_expr = statement.this
+    if not isinstance(schema_expr, exp.Schema):
         return
 
-    table_name = normalize_identifier(match.group("name"))
-    body = match.group("body")
-    table = schema.get(table_name)
-    if table is None:
-        table = Table(name=table_name)
-        schema[table_name] = table
+    table_name = _table_name(schema_expr.this)
+    table = schema.setdefault(table_name, Table(name=table_name))
     table.columns.clear()
     table.primary_key.clear()
     table.foreign_keys.clear()
@@ -385,264 +278,197 @@ def parse_create_table_statement(statement: str, schema: Schema) -> None:
     table.constraint_types.clear()
     table.primary_key_name = None
 
-    items = split_top_level_commas(body)
-    for item in items:
-        parse_column_definition(item, table)
-    for item in items:
-        parse_table_constraint(item, table)
+    for element in schema_expr.expressions or []:
+        _ingest_table_element(table, element)
     table.sync_primary_key_flags()
 
 
-def extract_index_components(rest: str) -> Tuple[str, Optional[str], Optional[str]]:
-    working = rest.strip()
+def _handle_create_index(statement: exp.Create, schema: Schema) -> None:
+    index_expr = statement.this
+    if not isinstance(index_expr, exp.Index):
+        return
+
+    table_name = _table_name(index_expr.args.get("table"))
+    table = schema.setdefault(table_name, Table(name=table_name))
+
+    params = index_expr.args.get("params")
+    column_items = params.args.get("columns") if isinstance(params, exp.IndexParameters) else None
+    columns: List[str] = []
+    column_names: List[Optional[str]] = []
+    expression_columns: List[str] = []
+    if column_items:
+        for item in column_items:
+            display, normalized = _format_ordered_expression(item)
+            columns.append(display)
+            column_names.append(normalized)
+            if normalized is None:
+                expression_columns.append(display)
     method = None
-    if working.upper().startswith("USING"):
-        parts = working.split(None, 2)
-        if len(parts) >= 2:
-            method = parts[1]
-            working = parts[2] if len(parts) == 3 else ""
-    paren_start = working.find("(")
-    if paren_start == -1:
-        return working, method, None
-    depth = 0
-    end_index = -1
-    for idx in range(paren_start, len(working)):
-        ch = working[idx]
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth == 0:
-                end_index = idx
-                break
-    if end_index == -1:
-        return working, method, None
-    columns_raw = working[paren_start + 1 : end_index]
-    tail = working[end_index + 1 :].strip()
     where_clause = None
-    where_match = re.search(r"\bWHERE\b", tail, re.IGNORECASE)
-    if where_match:
-        where_clause = tail[where_match.end() :].strip().rstrip(";")
-    return columns_raw, method, where_clause
+    if isinstance(params, exp.IndexParameters):
+        using_expr = params.args.get("using")
+        if isinstance(using_expr, exp.Var):
+            method = _identifier_name(using_expr.this).upper()
+        where_expr = params.args.get("where")
+        if isinstance(where_expr, exp.Where):
+            where_clause = _expression_sql(where_expr.this)
 
-
-def add_index_from_definition(
-    table: Table,
-    index_name: Optional[str],
-    columns_raw: str,
-    unique: bool,
-    where_clause: Optional[str],
-    method: Optional[str],
-) -> None:
-    columns_list = split_top_level_commas(columns_raw)
-    displays: List[str] = []
-    normalized_cols: List[Optional[str]] = []
-    expression_cols: List[str] = []
-    for col in columns_list:
-        display, normalized = format_index_column(col)
-        displays.append(display)
-        normalized_cols.append(normalized)
-        if normalized is None:
-            expression_cols.append(display)
+    index_name = _identifier_name(index_expr.this)
     index = Index(
-        name=normalize_identifier(index_name) if index_name else None,
-        columns=tuple(displays),
-        expression_columns=tuple(expression_cols),
-        column_names=tuple(normalized_cols),
-        unique=unique,
-        method=method.lower() if method else None,
-        where=where_clause.strip() if where_clause else None,
+        name=index_name or None,
+        columns=tuple(columns),
+        column_names=tuple(column_names),
+        expression_columns=tuple(expression_columns),
+        unique=bool(statement.args.get("unique")),
+        method=method,
+        where=where_clause,
     )
     table.add_index(index)
 
 
-def parse_create_index_statement(statement: str, schema: Schema) -> None:
-    stmt = statement.strip()
-    stmt_with_semicolon = stmt if stmt.endswith(";") else f"{stmt};"
-    match = CREATE_INDEX_RE.match(stmt_with_semicolon)
-    if not match:
-        return
-    table_name = normalize_identifier(match.group("table"))
-    table = schema.setdefault(table_name, Table(name=table_name))
-    columns_raw, method, where_clause = extract_index_components(match.group("rest"))
-    unique = bool(match.group("unique"))
-    index_name = match.group("name")
-    add_index_from_definition(table, index_name, columns_raw, unique, where_clause, method)
+def _handle_create(statement: exp.Create, schema: Schema) -> None:
+    kind = (statement.args.get("kind") or "").upper()
+    if kind == "TABLE":
+        _handle_create_table(statement, schema)
+    elif kind == "INDEX":
+        _handle_create_index(statement, schema)
 
 
-def parse_drop_index_statement(statement: str, schema: Schema) -> None:
-    stmt = statement.strip()
-    match = DROP_INDEX_RE.match(stmt)
-    if not match:
+def _handle_drop_table(table_name: str, schema: Schema) -> None:
+    if table_name not in schema:
         return
-    index_name = normalize_identifier(match.group("name"))
+    schema.pop(table_name, None)
     for table in schema.values():
-        if table.drop_index(index_name):
-            break
+        removed = [fk for fk in table.foreign_keys if fk.ref_table == table_name]
+        if not removed:
+            continue
+        table.foreign_keys = [fk for fk in table.foreign_keys if fk.ref_table != table_name]
+        for fk in removed:
+            if fk.name:
+                table.constraint_types.pop(fk.name.lower(), None)
 
 
-def parse_alter_index_statement(statement: str, schema: Schema) -> None:
-    stmt = statement.strip()
-    match = ALTER_INDEX_RE.match(stmt)
-    if not match:
-        return
-    index_name = normalize_identifier(match.group("name"))
-    new_name = normalize_identifier(match.group("new"))
-    for table in schema.values():
-        if table.rename_index(index_name, new_name):
-            break
+def _handle_drop(statement: exp.Drop, schema: Schema) -> None:
+    kind = (statement.args.get("kind") or "").upper()
+    if kind == "TABLE":
+        _handle_drop_table(_table_name(statement.this), schema)
+    elif kind == "INDEX":
+        target_name = _table_name(statement.this)
+        for table in schema.values():
+            if table.drop_index(target_name):
+                break
 
 
-def apply_alter_table_action(action: str, table: Table, schema: Schema) -> Optional[str]:
-    action = action.strip()
-    if not action:
-        return None
-
-    add_column_match = ADD_COLUMN_RE.match(action)
-    if add_column_match:
-        definition = add_column_match.group("definition").strip()
-        parse_column_definition(definition, table)
-        return None
-
-    drop_column_match = DROP_COLUMN_RE.match(action)
-    if drop_column_match:
-        column_name = normalize_identifier(drop_column_match.group("name"))
-        table.drop_column(column_name)
-        return None
-
-    set_not_null_match = ALTER_COLUMN_SET_NOT_NULL_RE.match(action)
-    if set_not_null_match:
-        column_name = normalize_identifier(set_not_null_match.group("name"))
-        table.update_nullable(column_name, False)
-        return None
-
-    drop_not_null_match = ALTER_COLUMN_DROP_NOT_NULL_RE.match(action)
-    if drop_not_null_match:
-        column_name = normalize_identifier(drop_not_null_match.group("name"))
-        table.update_nullable(column_name, True)
-        return None
-
-    alter_type_match = ALTER_COLUMN_TYPE_RE.match(action)
-    if alter_type_match:
-        column_name = normalize_identifier(alter_type_match.group("name"))
-        type_definition = alter_type_match.group("type").strip()
-        upper_type = type_definition.upper()
-        if " USING " in upper_type:
-            using_index = upper_type.index(" USING ")
-            type_definition = type_definition[:using_index].strip()
-        table.update_data_type(column_name, type_definition)
-        return None
-
-    add_constraint_match = ADD_CONSTRAINT_RE.match(action)
-    if add_constraint_match:
-        constraint_name = normalize_identifier(add_constraint_match.group("name"))
-        definition = add_constraint_match.group("definition").strip()
-        parse_table_constraint(f"CONSTRAINT {constraint_name} {definition}", table)
-        table.sync_primary_key_flags()
-        return None
-
-    if action.upper().startswith("ADD PRIMARY KEY"):
-        parse_table_constraint(action[len("ADD "):], table)
-        table.sync_primary_key_flags()
-        return None
-
-    if action.upper().startswith("ADD FOREIGN KEY"):
-        definition = action[len("ADD "):].strip()
-        parse_table_constraint(definition, table)
-        return None
-
-    drop_constraint_match = DROP_CONSTRAINT_RE.match(action)
-    if drop_constraint_match:
-        constraint_name = normalize_identifier(drop_constraint_match.group("name"))
-        table.drop_constraint(constraint_name)
-        return None
-
-    rename_constraint_match = RENAME_CONSTRAINT_RE.match(action)
-    if rename_constraint_match:
-        old_name = normalize_identifier(rename_constraint_match.group("old"))
-        new_name = normalize_identifier(rename_constraint_match.group("new"))
-        table.rename_constraint(old_name, new_name)
-        return None
-
-    rename_column_match = RENAME_COLUMN_RE.match(action)
-    if rename_column_match:
-        old_column = normalize_identifier(rename_column_match.group("old"))
-        new_column = normalize_identifier(rename_column_match.group("new"))
-        rename_column_in_schema(schema, table.name, old_column, new_column)
-        return None
-
-    rename_table_match = RENAME_TABLE_RE.match(action)
-    if rename_table_match:
-        new_table_name = normalize_identifier(rename_table_match.group("new"))
-        if new_table_name != table.name:
-            rename_table(schema, table.name, new_table_name)
-            return new_table_name
-        return None
-
-    return None
-
-
-def parse_alter_table_statement(statement: str, schema: Schema) -> None:
-    stmt = statement.strip()
-    stmt_with_semicolon = stmt if stmt.endswith(";") else f"{stmt};"
-    match = ALTER_TABLE_RE.match(stmt_with_semicolon)
-    if not match:
-        return
-
-    table_name = normalize_identifier(match.group("table"))
-    actions_raw = match.group("actions").strip()
-    if actions_raw.endswith(";"):
-        actions_raw = actions_raw[:-1].strip()
+def _handle_alter_table(statement: exp.Alter, schema: Schema) -> None:
+    table_name = _table_name(statement.this)
     table = schema.setdefault(table_name, Table(name=table_name))
-
-    actions = split_top_level_commas(actions_raw)
-    if not actions:
-        actions = [actions_raw]
-
     current_table_name = table_name
     current_table = table
 
-    for action in actions:
-        new_name = apply_alter_table_action(action, current_table, schema)
-        if new_name:
-            current_table_name = new_name
-            current_table = schema.setdefault(current_table_name, Table(name=current_table_name))
+    for action in statement.args.get("actions") or []:
+        if isinstance(action, exp.ColumnDef):
+            _ingest_column_definition(current_table, action)
+        elif isinstance(action, exp.AlterColumn):
+            column_name = _column_name(action.this)
+            if action.args.get("dtype"):
+                current_table.update_data_type(column_name, _expression_sql(action.args["dtype"]))
+            if "allow_null" in action.args:
+                allow_null = action.args["allow_null"]
+                current_table.update_nullable(column_name, bool(allow_null))
+        elif isinstance(action, exp.AddConstraint):
+            for expr in action.args.get("expressions") or []:
+                if isinstance(expr, exp.Constraint):
+                    _apply_constraint(current_table, expr)
+                elif isinstance(expr, exp.PrimaryKey):
+                    _apply_primary_key(current_table, expr, None)
+                elif isinstance(expr, exp.ForeignKey):
+                    _apply_foreign_key(current_table, expr, None)
+                elif isinstance(expr, exp.UniqueColumnConstraint):
+                    _apply_unique_constraint(current_table, expr, None)
+        elif isinstance(action, exp.Drop):
+            kind = (action.args.get("kind") or "").upper()
+            if kind == "COLUMN":
+                column_name = _column_name(action.this)
+                current_table.drop_column(column_name)
+            elif kind == "CONSTRAINT":
+                constraint_name = _table_name(action.this)
+                if constraint_name:
+                    current_table.drop_constraint(constraint_name)
+        elif isinstance(action, exp.RenameColumn):
+            old_name = _column_name(action.this)
+            new_name = _column_name(action.args.get("to"))
+            if old_name and new_name and old_name != new_name:
+                rename_column_in_schema(schema, current_table_name, old_name, new_name)
+                current_table = schema[current_table_name]
+        elif isinstance(action, exp.AlterRename):
+            new_table_name = _table_name(action.this)
+            if new_table_name and "." not in new_table_name and "." in current_table_name:
+                prefix = current_table_name.rsplit(".", 1)[0]
+                new_table_name = f"{prefix}.{new_table_name}"
+            if new_table_name and new_table_name != current_table_name:
+                rename_table(schema, current_table_name, new_table_name)
+                current_table_name = new_table_name
+                current_table = schema[current_table_name]
+
     current_table.sync_primary_key_flags()
 
 
-def parse_drop_table_statement(statement: str, schema: Schema) -> None:
-    stmt = statement.strip()
-    match = DROP_TABLE_RE.match(stmt)
+def _handle_alter_index(statement: exp.Alter, schema: Schema) -> None:
+    index_name = _table_name(statement.this)
+    current_name = index_name
+    for action in statement.args.get("actions") or []:
+        if isinstance(action, exp.AlterRename):
+            new_name = _table_name(action.this)
+            if not new_name or new_name == current_name:
+                continue
+            for table in schema.values():
+                if table.rename_index(current_name, new_name):
+                    current_name = new_name
+                    break
+
+
+def _handle_alter(statement: exp.Alter, schema: Schema) -> None:
+    kind = (statement.args.get("kind") or "").upper()
+    if kind == "INDEX":
+        _handle_alter_index(statement, schema)
+    else:
+        _handle_alter_table(statement, schema)
+
+
+def _handle_command(command: exp.Command, schema: Schema) -> None:
+    sql_text = command.sql(dialect="postgres")
+    match = RENAME_CONSTRAINT_RE.match(sql_text)
     if not match:
         return
+    table_name = _normalize_identifier(match.group("table"))
+    old_name = _normalize_identifier(match.group("old"))
+    new_name = _normalize_identifier(match.group("new"))
+    table = schema.setdefault(table_name, Table(name=table_name))
+    table.rename_constraint(old_name, new_name)
 
-    table_name = normalize_identifier(match.group("name"))
-    if table_name in schema:
-        schema.pop(table_name, None)
-        for table in schema.values():
-            removed_fk_names = [fk.name for fk in table.foreign_keys if fk.ref_table == table_name]
-            table.foreign_keys = [fk for fk in table.foreign_keys if fk.ref_table != table_name]
-            for name in removed_fk_names:
-                if name:
-                    table.constraint_types.pop(name.lower(), None)
+
+# ---------------------------------------------------------------------------
+# Public API
 
 
 def parse_schema_from_sql(sql: str, schema: Schema) -> None:
-    sql = strip_comments(sql)
-    for statement in split_sql_statements(sql):
-        upper_stmt = statement.lstrip().upper()
-        if upper_stmt.startswith("CREATE TABLE"):
-            parse_create_table_statement(statement, schema)
-        elif upper_stmt.startswith("ALTER TABLE"):
-            parse_alter_table_statement(statement, schema)
-        elif upper_stmt.startswith("DROP TABLE"):
-            parse_drop_table_statement(statement, schema)
-        elif upper_stmt.startswith("CREATE INDEX") or upper_stmt.startswith("CREATE UNIQUE INDEX"):
-            parse_create_index_statement(statement, schema)
-        elif upper_stmt.startswith("DROP INDEX"):
-            parse_drop_index_statement(statement, schema)
-        elif upper_stmt.startswith("ALTER INDEX"):
-            parse_alter_index_statement(statement, schema)
+    if not sql.strip():
+        return
+    try:
+        statements = sqlglot.parse(sql, read="postgres")
+    except ParseError:
+        return
+    for statement in statements:
+        if isinstance(statement, exp.Create):
+            _handle_create(statement, schema)
+        elif isinstance(statement, exp.Alter):
+            _handle_alter(statement, schema)
+        elif isinstance(statement, exp.Drop):
+            _handle_drop(statement, schema)
+        elif isinstance(statement, exp.Command):
+            _handle_command(statement, schema)
+    for table in schema.values():
+        table.sync_primary_key_flags()
 
 
 def load_schema_from_migrations(path: str) -> Schema:
@@ -651,6 +477,4 @@ def load_schema_from_migrations(path: str) -> Schema:
     for file_path in files:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
             parse_schema_from_sql(handle.read(), schema)
-    for table in schema.values():
-        table.sync_primary_key_flags()
     return schema

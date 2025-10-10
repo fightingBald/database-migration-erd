@@ -2,10 +2,11 @@
 """Layout helpers deciding where each table should be rendered."""
 from __future__ import annotations
 
-import heapq
 import math
 from dataclasses import dataclass
 from typing import Dict, List
+
+import networkx as nx
 
 from .schema import Schema, Table, describe_table_notes
 
@@ -53,45 +54,31 @@ def calculate_note_height(table: Table, config: LayoutConfig) -> tuple[List[str]
 
 
 def _build_levels(schema: Schema) -> Dict[str, int]:
-    graph: Dict[str, set[str]] = {name: set() for name in schema.keys()}
-    indegree: Dict[str, int] = {name: 0 for name in schema.keys()}
-
+    graph = nx.DiGraph()
+    graph.add_nodes_from(schema.keys())
     for table_name, table in schema.items():
         for fk in table.foreign_keys:
-            parent = fk.ref_table
-            if parent not in schema:
-                continue
-            graph.setdefault(parent, set()).add(table_name)
-            indegree[table_name] = indegree.get(table_name, 0) + 1
+            if fk.ref_table in schema:
+                graph.add_edge(fk.ref_table, table_name)
 
-    heap: List[str] = [name for name, deg in indegree.items() if deg == 0]
-    heapq.heapify(heap)
+    levels: Dict[str, int] = {}
+    if not graph.nodes:
+        return levels
 
-    levels: Dict[str, int] = {name: 0 for name in heap}
-    processed: List[str] = []
-
-    while heap:
-        name = heapq.heappop(heap)
-        processed.append(name)
-        current_level = levels.get(name, 0)
-        for child in sorted(graph.get(name, set())):
-            if child not in indegree:
-                continue
-            indegree[child] -= 1
-            levels[child] = max(levels.get(child, 0), current_level + 1)
-            if indegree[child] == 0:
-                heapq.heappush(heap, child)
-
-    remaining = [name for name, deg in indegree.items() if deg > 0 and name not in processed]
-    if remaining:
-        max_level = max(levels.values(), default=0)
-        for offset, name in enumerate(sorted(remaining)):
-            levels[name] = max_level + offset + 1
-            processed.append(name)
-
-    for name in schema.keys():
-        levels.setdefault(name, 0)
-
+    if nx.is_directed_acyclic_graph(graph):
+        for depth, layer in enumerate(nx.topological_generations(graph)):
+            for node in sorted(layer):
+                levels[node] = depth
+    else:
+        condensation = nx.condensation(graph)
+        for depth, layer in enumerate(nx.topological_generations(condensation)):
+            members: List[str] = []
+            for component in layer:
+                members.extend(condensation.nodes[component]["members"])
+            for node in sorted(members):
+                levels[node] = depth
+    for node in graph.nodes:
+        levels.setdefault(node, 0)
     return levels
 
 
