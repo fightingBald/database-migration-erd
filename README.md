@@ -29,7 +29,8 @@ python3 gen_drawio_erd_table.py \
   --out ./schema.drawio \
   --show-types \
   --per-row 0 \
-  --log-dir .
+  --log-dir . \
+  --fk-config sample_fk_config.yaml
 ```
 
 Arguments:
@@ -38,10 +39,34 @@ Arguments:
 - `--show-types`: include column data types in the table rows.
 - `--per-row`: optional layout tuning; tables per row (default `0` = automatic based on graph).
 - `--log-dir`: optional base directory for parse logs; the tool writes to `<log-dir>/parse_log/parse_failures_<timestamp>.log` (default root: current working directory).
+- `--fk-config`: optional YAML file providing extra foreign-key relationships to inject before rendering.
 
 ### Foreign key hints via comments
 
-When database-level foreign keys are omitted, annotate the referencing column with a line comment in the form `-- FK schema.table(column[, ...])`. The parser is whitespace-tolerant, so formats like `-- FK  public.products ( id )` are accepted. Each hint produces a virtual foreign key in the diagram without requiring the actual constraint in SQL.
+When database-level foreign keys are omitted, there are three ways to keep relationships intact:
+
+- **Native DDL**: declared `FOREIGN KEY` constraints in your migration SQL are parsed automatically.
+- **Comment hints**: annotate the referencing column with a line comment in the form `-- FK schema.table(column[, ...])`. The parser is whitespace-tolerant, so formats like `-- FK  public.products ( id )` are accepted.
+- **YAML overrides**: supply an external map of relationships for legacy databases or application-managed integrity.
+
+### Foreign key configuration via YAML
+
+Sometimes migrations omit foreign keys entirely. Supply a YAML file via `--fk-config` to stitch tables together explicitly:
+
+```yaml
+users:
+  fks:
+    - [role_id, roles, id]
+    - [manager_id, users, id]
+```
+
+Each entry is `[local_column, target_table, target_column]`. Multi-column relationships can be expressed with nested lists (e.g. `[[tenant_id, user_id], memberships, [tenant_id, id]]`). The loader logs to the same parse log output when the YAML file cannot be parsed.
+
+The YAML is handled by the dedicated `erd_generator.fk_config` module, keeping CLI wiring slim and making it easy to unit-test override scenarios.
+
+Example assets for quick testing are included:
+- `db/migration/V6__roles_and_managers.sql` adds `role_id` and `manager_id` columns without database constraints.
+- `sample_fk_config.yaml` links those columns (and a couple of earlier tables) so you can run `python3 gen_drawio_erd_table.py ... --fk-config sample_fk_config.yaml` and confirm the overrides appear in the diagram.
 
 The generated `schema.drawio` can be opened with [diagrams.net](https://app.diagrams.net/) or draw.io desktop.
 

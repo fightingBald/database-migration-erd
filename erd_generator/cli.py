@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .drawio import build_drawio
+from .fk_config import apply_foreign_key_config, load_foreign_key_config
 from .layout import LayoutConfig
 from .sql_parser import ParseFailure, get_last_parse_failures, load_schema_from_migrations
 
@@ -29,6 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--log-dir",
         help="Optional root directory for parse logs; logs will be written under <log-dir>/parse_log "
         "(default: ./parse_log relative to the current working directory).",
+    )
+    parser.add_argument(
+        "--fk-config",
+        help="Optional YAML file describing additional foreign key links to inject before rendering.",
     )
     return parser
 
@@ -64,10 +69,11 @@ def _write_failure_log(failures: list[ParseFailure], log_root: Optional[str]) ->
 
     print(f"Parse log written to {log_path}")
 
-
 def run_cli(args: argparse.Namespace) -> int:
     schema = load_schema_from_migrations(args.migrations)
     failures = get_last_parse_failures()
+    config_entries, config_source = load_foreign_key_config(args.fk_config, failures)
+    apply_foreign_key_config(schema, config_entries, config_source=config_source)
     if not schema:
         print("No tables detected. Check your migration path or SQL dialect support.", file=sys.stderr)
         return 1
