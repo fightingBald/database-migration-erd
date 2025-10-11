@@ -5,10 +5,13 @@ import argparse
 import os
 import sys
 import xml.etree.ElementTree as ET
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 from .drawio import build_drawio
 from .layout import LayoutConfig
-from .sql_parser import load_schema_from_migrations
+from .sql_parser import ParseFailure, get_last_parse_failures, load_schema_from_migrations
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,11 +25,49 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Tables per row (0 = auto based on graph, default: 0)",
     )
+    parser.add_argument(
+        "--log-dir",
+        help="Optional root directory for parse logs; logs will be written under <log-dir>/parse_log "
+        "(default: ./parse_log relative to the current working directory).",
+    )
     return parser
+
+
+def _print_failure_summary(failures: list[ParseFailure]) -> None:
+    if not failures:
+        return
+    print("\nUnsupported SQL statements:")
+    for failure in failures:
+        location = failure.source or "<input>"
+        print(f" - {location}: {failure.reason}: {failure.sql}")
+
+
+def _resolve_log_directory(log_root: Optional[str]) -> Path:
+    base = Path(log_root).expanduser().resolve() if log_root else Path.cwd()
+    target_dir = base / "parse_log"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    return target_dir
+
+
+def _write_failure_log(failures: list[ParseFailure], log_root: Optional[str]) -> None:
+    if not failures:
+        return
+    directory = _resolve_log_directory(log_root)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = directory / f"parse_failures_{timestamp}.log"
+
+    with log_path.open("w", encoding="utf-8") as handle:
+        handle.write(f"Parse failures collected at {datetime.now().isoformat()}\n\n")
+        for failure in failures:
+            location = failure.source or "<input>"
+            handle.write(f"{location}\n  {failure.reason}: {failure.sql}\n")
+
+    print(f"Parse log written to {log_path}")
 
 
 def run_cli(args: argparse.Namespace) -> int:
     schema = load_schema_from_migrations(args.migrations)
+    failures = get_last_parse_failures()
     if not schema:
         print("No tables detected. Check your migration path or SQL dialect support.", file=sys.stderr)
         return 1
@@ -45,6 +86,8 @@ def run_cli(args: argparse.Namespace) -> int:
     tree.write(args.out, encoding="utf-8", xml_declaration=False)
     print(f"Diagram written to {args.out}")
 
+    _print_failure_summary(failures)
+    _write_failure_log(failures, args.log_dir)
 
     return 0
 

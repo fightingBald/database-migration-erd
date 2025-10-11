@@ -4,6 +4,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 import sqlglot
@@ -91,6 +92,40 @@ def _expression_sql(node: Optional[exp.Expression]) -> str:
     if node is None:
         return ""
     return node.sql(dialect="postgres")
+
+
+# ---------------------------------------------------------------------------
+# Failure tracking
+
+
+@dataclass(frozen=True)
+class ParseFailure:
+    source: Optional[str]
+    sql: str
+    reason: str
+
+
+_LAST_PARSE_FAILURES: List[ParseFailure] = []
+
+
+def _clean_sql_snippet(sql_text: str, limit: int = 200) -> str:
+    snippet = " ".join(sql_text.strip().split())
+    if len(snippet) > limit:
+        return f"{snippet[: limit - 3]}..."
+    return snippet
+
+
+def _record_failure(
+    failures: Optional[List[ParseFailure]],
+    source: Optional[str],
+    sql_text: str,
+    reason: str,
+) -> None:
+    snippet = _clean_sql_snippet(sql_text)
+    location = source or "<input>"
+    print(f"[WARN] {reason} in {location}: {snippet}")
+    if failures is not None:
+        failures.append(ParseFailure(source=source, sql=snippet, reason=reason))
 
 
 # ---------------------------------------------------------------------------
@@ -435,28 +470,36 @@ def _handle_alter(statement: exp.Alter, schema: Schema) -> None:
         _handle_alter_table(statement, schema)
 
 
-def _handle_command(command: exp.Command, schema: Schema) -> None:
+def _handle_command(command: exp.Command, schema: Schema) -> bool:
     sql_text = command.sql(dialect="postgres")
     match = RENAME_CONSTRAINT_RE.match(sql_text)
     if not match:
-        return
+        return False
     table_name = _normalize_identifier(match.group("table"))
     old_name = _normalize_identifier(match.group("old"))
     new_name = _normalize_identifier(match.group("new"))
     table = schema.setdefault(table_name, Table(name=table_name))
     table.rename_constraint(old_name, new_name)
+    return True
 
 
 # ---------------------------------------------------------------------------
 # Public API
 
 
-def parse_schema_from_sql(sql: str, schema: Schema) -> None:
+def parse_schema_from_sql(
+    sql: str,
+    schema: Schema,
+    *,
+    source: Optional[str] = None,
+    failures: Optional[List[ParseFailure]] = None,
+) -> None:
     if not sql.strip():
         return
     try:
         statements = sqlglot.parse(sql, read="postgres")
-    except ParseError:
+    except ParseError as exc:
+        _record_failure(failures, source, sql, f"Parse error ({exc.__class__.__name__})")
         return
     for statement in statements:
         if isinstance(statement, exp.Create):
@@ -466,15 +509,33 @@ def parse_schema_from_sql(sql: str, schema: Schema) -> None:
         elif isinstance(statement, exp.Drop):
             _handle_drop(statement, schema)
         elif isinstance(statement, exp.Command):
-            _handle_command(statement, schema)
+            handled = _handle_command(statement, schema)
+            reason = "Parsed via generic command handler" if handled else "Unsupported SQL command"
+            _record_failure(
+                failures,
+                source,
+                statement.sql(dialect="postgres"),
+                reason,
+            )
     for table in schema.values():
         table.sync_primary_key_flags()
 
 
 def load_schema_from_migrations(path: str) -> Schema:
     schema: Schema = {}
+    global _LAST_PARSE_FAILURES
+    _LAST_PARSE_FAILURES = []
     files = sorted(glob.glob(os.path.join(path, "**", "*.sql"), recursive=True))
     for file_path in files:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            parse_schema_from_sql(handle.read(), schema)
+            parse_schema_from_sql(
+                handle.read(),
+                schema,
+                source=file_path,
+                failures=_LAST_PARSE_FAILURES,
+            )
     return schema
+
+
+def get_last_parse_failures() -> List[ParseFailure]:
+    return list(_LAST_PARSE_FAILURES)

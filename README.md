@@ -13,6 +13,7 @@ Generate simple draw.io ERD diagrams directly from a directory of PostgreSQL-sty
 - Produces draw.io XML using the built-in `table` shape with PK markers, optional data types, and a constraint note beneath each table (primary key, foreign keys, indexes).
 - Auto-layered layout groups related tables (following foreign-key levels) with generous spacing; tweak via `--per-row` if needed.
 - Built on top of [sqlglot](https://github.com/tobymao/sqlglot) for robust PostgreSQL DDL parsing and [NetworkX](https://networkx.org/) for graph-aware layout ordering.
+- Emits per-run warnings for unsupported SQL (e.g. dialect gaps) and can archive them as timestamped files for later inspection.
 
 ## Installation
 Ensure Python 3.9+ is available; no packaging step is required.
@@ -30,7 +31,8 @@ python3 gen_drawio_erd_table.py \
   --migrations ./db/migration \
   --out ./schema.drawio \
   --show-types \
-  --per-row 0
+  --per-row 0 \
+  --log-dir .
 ```
 
 Arguments:
@@ -38,6 +40,7 @@ Arguments:
 - `--out`: where the `.drawio` document will be written.
 - `--show-types`: include column data types in the table rows.
 - `--per-row`: optional layout tuning; tables per row (default `0` = automatic based on graph).
+- `--log-dir`: optional base directory for parse logs; the tool writes to `<log-dir>/parse_log/parse_failures_<timestamp>.log` (default root: current working directory).
 
 The generated `schema.drawio` can be opened with [diagrams.net](https://app.diagrams.net/) or draw.io desktop.
 
