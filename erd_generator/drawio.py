@@ -103,6 +103,33 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
 
     for layout in layouts:
         table = layout.table
+        total_height = layout.height + (layout.note_height if layout.note_lines else 0.0)
+
+        group_id = ids.next()
+        group_cell = ET.SubElement(
+            root,
+            "mxCell",
+            {
+                "id": group_id,
+                "value": "",
+                "style": "group",
+                "vertex": "1",
+                "connectable": "0",
+                "parent": "1",
+            },
+        )
+        ET.SubElement(
+            group_cell,
+            "mxGeometry",
+            {
+                "x": f"{layout.x:.2f}",
+                "y": f"{layout.y:.2f}",
+                "width": f"{layout.width:.2f}",
+                "height": f"{max(total_height, 1.0):.2f}",
+                "as": "geometry",
+            },
+        )
+
         table_id = ids.next()
         table_id_map[table.name] = table_id
         table_cell = ET.SubElement(
@@ -113,15 +140,15 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
                 "value": _render_table_label(table),
                 "style": TABLE_STYLE,
                 "vertex": "1",
-                "parent": "1",
+                "parent": group_id,
             },
         )
         geometry = ET.SubElement(
             table_cell,
             "mxGeometry",
             {
-                "x": f"{layout.x:.2f}",
-                "y": f"{layout.y:.2f}",
+                "x": "0",
+                "y": "0",
                 "width": f"{layout.width:.2f}",
                 "height": f"{layout.height:.2f}",
                 "as": "geometry",
@@ -239,15 +266,15 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
                     "value": note_value,
                     "style": NOTE_STYLE,
                     "vertex": "1",
-                    "parent": "1",
+                    "parent": group_id,
                 },
             )
             ET.SubElement(
                 note_cell,
                 "mxGeometry",
                 {
-                    "x": f"{layout.x:.2f}",
-                    "y": f"{layout.y + layout.height + margin:.2f}",
+                    "x": "0",
+                    "y": f"{layout.height + margin:.2f}",
                     "width": f"{layout.width:.2f}",
                     "height": f"{max(content_height, 1.0):.2f}",
                     "as": "geometry",
