@@ -1,11 +1,6 @@
-## Summary
-- Generate draw.io ERDs directly from PostgreSQL-style migrations.
-- Minimal, self-contained SQL parser (no DB connection required).
-- Graph-aware layout and constraint annotations aid visual inspection.
-
 # db_migraton_diagram_generator
 
-Generate simple draw.io ERD diagrams directly from a directory of PostgreSQL-style migration SQL files.
+Generate simple draw.io ERD diagrams directly from a `indicated_directory_path` of PostgreSQL-style migration SQL files  **(no DB connection required)**.
 
 ## Features
 - Parses `CREATE TABLE` (including inline/table-level PRIMARY KEY and FOREIGN KEY definitions) plus common `ALTER TABLE` statements (add/drop/alter columns, add/drop constraints, rename columns/tables/constraints).
