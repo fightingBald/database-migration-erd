@@ -14,13 +14,13 @@ from .schema import Schema, Table, describe_table_notes
 @dataclass(frozen=True)
 class LayoutConfig:
     per_row: int = 0
-    table_width: int = 340
+    table_width: int = 360
     row_height: int = 30
     header_height: int = 30
-    padding_x: int = 120
-    padding_y: int = 60
-    gap_x: int = 140
-    gap_y: int = 120
+    padding_x: int = 180
+    padding_y: int = 120
+    gap_x: int = 220
+    gap_y: int = 200
     index_note_margin: int = 12
     index_note_line_height: int = 16
 

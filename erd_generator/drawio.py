@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from typing import Dict
+from typing import Dict, Optional, Tuple
 from xml.sax.saxutils import escape
 
 from .layout import LayoutConfig, TableLayout, layout_tables
@@ -35,8 +35,8 @@ CELL_LEFT_STYLE = (
     "editable=1;overflow=hidden;fontStyle=1"
 )
 CELL_RIGHT_STYLE = (
-    "shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;"
-    "align=left;spacingLeft=6;overflow=hidden;"
+    "shape=partialRectangle;connectable=1;fillColor=none;top=0;left=0;bottom=0;right=0;"
+    "align=left;spacingLeft=6;overflow=hidden;portConstraint=eastwest;"
 )
 EDGE_STYLE = (
     "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;"
@@ -99,6 +99,7 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
 
     ids = IdGenerator()
     table_id_map: Dict[str, str] = {}
+    column_cell_ids: Dict[Tuple[str, str], str] = {}
 
     for layout in layouts:
         table = layout.table
@@ -223,6 +224,7 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
                     "as": "alternateBounds",
                 },
             )
+            column_cell_ids[(table.name, column.name.lower())] = right_id
 
         if layout.note_lines:
             margin = config.index_note_margin
@@ -258,23 +260,51 @@ def build_drawio(schema: Schema, show_types: bool = False, layout_config: Layout
         if not source_id:
             continue
         for fk in table.foreign_keys:
-            target_id = table_id_map.get(fk.ref_table)
-            if not target_id:
+            target_table_id = table_id_map.get(fk.ref_table)
+            if not target_table_id:
                 continue
-            edge_id = ids.next()
-            edge_cell = ET.SubElement(
-                root,
-                "mxCell",
-                {
-                    "id": edge_id,
-                    "value": "",
-                    "style": EDGE_STYLE,
-                    "edge": "1",
-                    "parent": "1",
-                    "source": source_id,
-                    "target": target_id,
-                },
-            )
-            ET.SubElement(edge_cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+            local_columns = list(fk.columns)
+            ref_columns = list(fk.ref_columns)
+            pairs: list[Tuple[str, Optional[str]]] = []
+            if ref_columns and len(ref_columns) == len(local_columns):
+                pairs = list(zip(local_columns, ref_columns))
+            elif ref_columns:
+                pairs = [(local_columns[0], ref_columns[0])]
+            else:
+                pairs = [(col, None) for col in local_columns]
+
+            for local_col, ref_col in pairs:
+                source_cell = column_cell_ids.get((table.name, local_col.lower()))
+                target_cell = column_cell_ids.get((fk.ref_table, (ref_col or "").lower())) if ref_col else None
+                if not target_cell and fk.ref_table in schema:
+                    ref_table = schema[fk.ref_table]
+                    candidates = []
+                    if ref_col:
+                        candidates.append(ref_col.lower())
+                    candidates.append(local_col.lower())
+                    candidates.extend(col.lower() for col in sorted(ref_table.primary_key))
+                    for candidate in candidates:
+                        hit = column_cell_ids.get((fk.ref_table, candidate))
+                        if hit:
+                            target_cell = hit
+                            break
+
+                source_ref = source_cell or source_id
+                target_ref = target_cell or target_table_id
+                edge_id = ids.next()
+                edge_cell = ET.SubElement(
+                    root,
+                    "mxCell",
+                    {
+                        "id": edge_id,
+                        "value": "",
+                        "style": EDGE_STYLE,
+                        "edge": "1",
+                        "parent": "1",
+                        "source": source_ref,
+                        "target": target_ref,
+                    },
+                )
+                ET.SubElement(edge_cell, "mxGeometry", {"relative": "1", "as": "geometry"})
 
     return ET.ElementTree(mxfile)

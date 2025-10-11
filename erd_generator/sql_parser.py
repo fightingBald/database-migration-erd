@@ -5,7 +5,8 @@ import glob
 import os
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import sqlglot
 from sqlglot import exp
@@ -299,7 +300,50 @@ def _ingest_table_element(table: Table, element: exp.Expression) -> None:
 # Statement handlers
 
 
-def _handle_create_table(statement: exp.Create, schema: Schema) -> None:
+def _extract_fk_hints(raw_sql: str) -> List[Tuple[str, str, Tuple[str, ...]]]:
+    hints: List[Tuple[str, str, Tuple[str, ...]]] = []
+    fk_pattern = re.compile(
+        r"--\s*FK\s+(?P<table>[^(]+?)\s*\((?P<cols>[^)]*)\)",
+        re.IGNORECASE,
+    )
+    column_pattern = re.compile(r'^\s*(?P<name>"[^"]+"|[A-Za-z_][\w]*)')
+
+    for line in raw_sql.splitlines():
+        match = fk_pattern.search(line)
+        if not match:
+            continue
+        before_comment = line[: match.start()]
+        column_match = column_pattern.match(before_comment)
+        if not column_match:
+            continue
+        local_column = _column_name(column_match.group("name"))
+        ref_table = _table_name(match.group("table"))
+        ref_columns_raw = match.group("cols")
+        ref_columns: Tuple[str, ...] = tuple(
+            _column_name(part) for part in ref_columns_raw.split(",") if part.strip()
+        )
+        hints.append((local_column, ref_table, ref_columns))
+    return hints
+
+
+def _apply_fk_hints(table: Table, hints: Iterable[Tuple[str, str, Tuple[str, ...]]]) -> None:
+    for local_column, ref_table, ref_columns in hints:
+        if not local_column or not ref_table:
+            continue
+        local_columns = (local_column,)
+        target_columns = ref_columns or local_columns
+        exists = any(
+            fk.columns == local_columns and fk.ref_table == ref_table and fk.ref_columns == target_columns
+            for fk in table.foreign_keys
+        )
+        if exists:
+            continue
+        table.add_foreign_key(
+            ForeignKey(columns=local_columns, ref_table=ref_table, ref_columns=target_columns)
+        )
+
+
+def _handle_create_table(statement: exp.Create, schema: Schema, raw_sql: Optional[str] = None) -> None:
     schema_expr = statement.this
     if not isinstance(schema_expr, exp.Schema):
         return
@@ -315,6 +359,9 @@ def _handle_create_table(statement: exp.Create, schema: Schema) -> None:
 
     for element in schema_expr.expressions or []:
         _ingest_table_element(table, element)
+    if raw_sql:
+        hints = _extract_fk_hints(raw_sql)
+        _apply_fk_hints(table, hints)
     table.sync_primary_key_flags()
 
 
@@ -361,10 +408,10 @@ def _handle_create_index(statement: exp.Create, schema: Schema) -> None:
     table.add_index(index)
 
 
-def _handle_create(statement: exp.Create, schema: Schema) -> None:
+def _handle_create(statement: exp.Create, schema: Schema, raw_sql: Optional[str] = None) -> None:
     kind = (statement.args.get("kind") or "").upper()
     if kind == "TABLE":
-        _handle_create_table(statement, schema)
+        _handle_create_table(statement, schema, raw_sql)
     elif kind == "INDEX":
         _handle_create_index(statement, schema)
 
@@ -487,6 +534,68 @@ def _handle_command(command: exp.Command, schema: Schema) -> bool:
 # Public API
 
 
+def _split_sql_statements(sql: str) -> List[str]:
+    statements: List[str] = []
+    buf: List[str] = []
+    in_single = False
+    in_double = False
+    i = 0
+    length = len(sql)
+    while i < length:
+        ch = sql[i]
+        next_two = sql[i : i + 2]
+        if ch == "'" and not in_double:
+            if in_single and i + 1 < length and sql[i + 1] == "'":
+                buf.append("''")
+                i += 2
+                continue
+            in_single = not in_single
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == '"' and not in_single:
+            if in_double and i + 1 < length and sql[i + 1] == '"':
+                buf.append('""')
+                i += 2
+                continue
+            in_double = not in_double
+            buf.append(ch)
+            i += 1
+            continue
+        if not in_single and not in_double and next_two == "--":
+            newline_index = sql.find("\n", i)
+            if newline_index == -1:
+                buf.append(sql[i:])
+                i = length
+                break
+            buf.append(sql[i:newline_index])
+            i = newline_index
+            continue
+        if not in_single and not in_double and next_two == "/*":
+            end_index = sql.find("*/", i + 2)
+            if end_index == -1:
+                buf.append(sql[i:])
+                i = length
+                break
+            end_index += 2
+            buf.append(sql[i:end_index])
+            i = end_index
+            continue
+        if ch == ";" and not in_single and not in_double:
+            statement = "".join(buf).strip()
+            if statement:
+                statements.append(statement)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 def parse_schema_from_sql(
     sql: str,
     schema: Schema,
@@ -496,27 +605,33 @@ def parse_schema_from_sql(
 ) -> None:
     if not sql.strip():
         return
-    try:
-        statements = sqlglot.parse(sql, read="postgres")
-    except ParseError as exc:
-        _record_failure(failures, source, sql, f"Parse error ({exc.__class__.__name__})")
-        return
-    for statement in statements:
-        if isinstance(statement, exp.Create):
-            _handle_create(statement, schema)
-        elif isinstance(statement, exp.Alter):
-            _handle_alter(statement, schema)
-        elif isinstance(statement, exp.Drop):
-            _handle_drop(statement, schema)
-        elif isinstance(statement, exp.Command):
-            handled = _handle_command(statement, schema)
-            reason = "Parsed via generic command handler" if handled else "Unsupported SQL command"
+    for raw_statement in _split_sql_statements(sql):
+        try:
+            expressions = sqlglot.parse(raw_statement, read="postgres")
+        except ParseError as exc:
             _record_failure(
                 failures,
                 source,
-                statement.sql(dialect="postgres"),
-                reason,
+                raw_statement,
+                f"Parse error ({exc.__class__.__name__})",
             )
+            continue
+        for statement in expressions:
+            if isinstance(statement, exp.Create):
+                _handle_create(statement, schema, raw_statement)
+            elif isinstance(statement, exp.Alter):
+                _handle_alter(statement, schema)
+            elif isinstance(statement, exp.Drop):
+                _handle_drop(statement, schema)
+            elif isinstance(statement, exp.Command):
+                handled = _handle_command(statement, schema)
+                reason = "Parsed via generic command handler" if handled else "Unsupported SQL command"
+                _record_failure(
+                    failures,
+                    source,
+                    statement.sql(dialect="postgres"),
+                    reason,
+                )
     for table in schema.values():
         table.sync_primary_key_flags()
 
