@@ -95,11 +95,10 @@ Unsupported-but-common features (handled as no-ops) include `SET/DROP DEFAULT`, 
 
 ## Known Limitations
 - Only a small SQL subset is supported (PostgreSQL DDL). Exotic syntax, quoted identifiers with spaces, and database-specific extensions may require manual adjustments.
-- Inline multi-column foreign keys are mapped as one edge (using the first column), which is usually sufficient for ERD visualisation but does not capture all column pairings.
+- Multi-column foreign keys draw one connector per column pair when both sides are provided; if the SQL omits or mismatches reference columns we fall back to a single edge.
 - Advanced ALTER patterns (e.g. ALTER COLUMN SET DEFAULT, CHECK constraints, expression indexes, function-based index column rewrites) are ignored; apply them manually if needed.
 - Views, enums, and other object types are ignored.
 
 ## Development Notes
-- Core code lives in the `erd_generator` package with clear separation between SQL parsing, layout, and draw.io rendering.
 - Run `python3 gen_drawio_erd_table.py --help` to see the latest CLI options.
 - Contributions: add migration fixtures under `db/migration` and regenerate `schema.drawio` to verify changes visually.
