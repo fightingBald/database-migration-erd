@@ -93,7 +93,7 @@ The parser targets a practical subset of PostgreSQL DDL with predictable formatt
 
 Unsupported-but-common features (handled as no-ops) include `SET/DROP DEFAULT`, `CHECK` constraints, partition syntax, and rewriting expression definitions during renames.
 
-##⚠️ Known Limitations
+## ⚠️Known Limitations
 - Only a small SQL subset is supported (PostgreSQL DDL). Exotic syntax, quoted identifiers with spaces, and database-specific extensions may require manual adjustments.
 - Multi-column foreign keys draw one connector per column pair when both sides are provided; if the SQL omits or mismatches reference columns we fall back to a single edge.
 - Advanced ALTER patterns (e.g. ALTER COLUMN SET DEFAULT, CHECK constraints, expression indexes, function-based index column rewrites) are ignored; apply them manually if needed.
