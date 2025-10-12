@@ -24,7 +24,9 @@ pip install -r requirements.txt
 ```
 
 ## 💡 Usage Example In This Repository (with sample migrations and files)
-You could use this example generates `schema.drawio` from the sample migrations in `./db/migration` and includes foreign key hints from `sample_fk_config.yaml`, to see what it gives and check the result(drag and drop the generated `./schema.drawio` ) in the drawIO website **REPLACE THE PATHS AS NEEDED**:
+You could use this example generated `schema.drawio` from the sample migrations in `./db/migration` and includes foreign key hints from `sample_fk_config.yaml`, to see what it gives and check the result(drag and drop the generated `./schema.drawio` ) in the drawIO website 
+
+**REPLACE THE PATHS AS NEEDED**:
 ```bash
 python3 gen_drawio_erd_table.py \
   --migrations ./db/migration \
@@ -43,7 +45,7 @@ Arguments:
 - `--log-dir`: optional base directory for parse logs; the tool writes to `<log-dir>/parse_log/parse_failures_<timestamp>.log` (default root: current working directory).
 - `--fk-config`: optional YAML file providing extra foreign-key relationships to inject before rendering.
 
-### Foreign key relation support when in DB level there's no foreign keys explicitly defined
+### ✅ Foreign key relation support when in DB level there's no foreign keys explicitly defined
 
 When database-level foreign keys are omitted, there are three ways to keep relationships intact:
 
