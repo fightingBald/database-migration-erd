@@ -1,5 +1,5 @@
 # db_migraton_diagram_generator
-* Generate simple draw.io ERD diagrams directly from a `indicated_directory_path` of PostgreSQL-style migration SQL files  **(no DB connection required)**.
+* Generate draw.io ERD diagrams directly from `YOUR_MIGRATION_FOLDER_FILEPATH` **(no DB connection required)**.
 * This project is aim to help the LAZY-ASS save the time to manually draw the ERD diagrams when you have a set of migration files.
 * The generated diagram could be DRAG and DROP directly in browser https://www.drawio.com/
 
