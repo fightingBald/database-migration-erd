@@ -1,9 +1,7 @@
 # db_migraton_diagram_generator
-
-Generate simple draw.io ERD diagrams directly from a `indicated_directory_path` of PostgreSQL-style migration SQL files  **(no DB connection required)**.
-This project is aim to help the LAZY-ASS save the time to manually draw the ERD diagrams when you have a set of migration files.
-The generated diagram could be DRAG and DROP directly in browser https://www.drawio.com/
-
+* Generate simple draw.io ERD diagrams directly from a `indicated_directory_path` of PostgreSQL-style migration SQL files  **(no DB connection required)**.
+* This project is aim to help the LAZY-ASS save the time to manually draw the ERD diagrams when you have a set of migration files.
+* The generated diagram could be DRAG and DROP directly in browser https://www.drawio.com/
 
 ## Features
 - Parses `CREATE TABLE` (including inline/table-level PRIMARY KEY and FOREIGN KEY definitions) plus common `ALTER TABLE` statements (add/drop/alter columns, add/drop constraints, rename columns/tables/constraints).
