@@ -10,7 +10,7 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import ParseError, TokenError
 
 from .schema import (
     Column,
@@ -608,7 +608,7 @@ def parse_schema_from_sql(
     for raw_statement in _split_sql_statements(sql):
         try:
             expressions = sqlglot.parse(raw_statement, read="postgres")
-        except ParseError as exc:
+        except (ParseError, TokenError) as exc:
             _record_failure(
                 failures,
                 source,
