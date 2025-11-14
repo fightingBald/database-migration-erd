@@ -96,9 +96,9 @@ The parser:
 - picks table cells via `vertex="1"` + `shape=table;` styles and uses their `value` as the table name.
 - looks through descendant row/column cells to recover column names (skipping helper labels such as `PK`/`FK`, and falling back to empty strings when none can be resolved).
 - ignores annotation/text nodes (style starting with `text;`) so notes like unique index descriptions do not pollute the output.
-- walks every connector (`edge="1"`) so even visually-connected-but-unmapped edges show up in the log; only edges with a resolved start table/column and target table are written to the YAML.
-- emits FK-config-style YAML compatible with `erd_generator.fk_config`, grouping foreign keys by source table (only the edges with enough metadata make it into the file).
-- prints warnings/informational logs for missing tables/columns so you can patch up the generated YAML manually if needed.
+- walks every connector (`edge="1"`) so even visually-connected-but-unmapped edges show up in the log; missing pieces are rendered as placeholders such as `__MISSING_START_TABLE_12__` so you can fill them in later.
+- emits FK-config-style YAML compatible with `erd_generator.fk_config`, grouping foreign keys by source table (every edge is included, even when placeholders are needed).
+- prints warnings/informational logs for missing tables/columns and writes a companion text report (`<diagram>.edge_anomalies.log`, override with `--failure-log`) enumerating the problematic edges for manual cleanup.
 
 ## Supported SQL Snippets
 The parser targets a practical subset of PostgreSQL DDL with predictable formatting. Currently handled constructs include:
