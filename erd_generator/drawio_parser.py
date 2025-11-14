@@ -183,14 +183,12 @@ def parse_drawio_edges(path: str) -> List[Dict[str, str]]:
             continue
         start = _resolve_node_context(cell.source, table_ids, column_map, cells)
         end = _resolve_node_context(cell.target, table_ids, column_map, cells)
-        if not start or not end:
-            continue
         edges.append(
             {
-                "start_table": start.table,
-                "start_column": start.column,
-                "end_table": end.table,
-                "end_column": end.column,
+                "start_table": start.table if start else "",
+                "start_column": start.column if start else "",
+                "end_table": end.table if end else "",
+                "end_column": end.column if end else "",
             }
         )
     return edges

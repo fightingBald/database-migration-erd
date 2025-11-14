@@ -82,21 +82,23 @@ The generated `schema.drawio` can be opened with [diagrams.net](https://app.diag
 - `erd_generator/drawio.py`: renders the collected schema into draw.io XML elements.
 - `erd_generator/drawio_parser.py`: walks existing draw.io XML and resolves table/column nodes plus edges.
 - `erd_generator/fk_config.py`: loads foreign-key relationship overrides from YAML files.
-- `parse_drawio_edges.py`: CLI wrapper that emits the extracted edge list as JSON.
+- `parse_drawio_edges.py`: CLI wrapper that emits FK-config-style YAML plus anomaly logs.
 - `db/migration/`: sample migrations covering the supported DDL patterns.
 
 ## Extract relationships from existing draw.io files
 When you already have a `.drawio` document and only want the table/column connection list, run:
 
 ```bash
-python3 parse_drawio_edges.py path/to/schema.drawio > edges.json
+python3 parse_drawio_edges.py path/to/schema.drawio > sample_fk_config.yaml
 ```
 
 The parser:
 - picks table cells via `vertex="1"` + `shape=table;` styles and uses their `value` as the table name.
 - looks through descendant row/column cells to recover column names (skipping helper labels such as `PK`/`FK`, and falling back to empty strings when none can be resolved).
 - ignores annotation/text nodes (style starting with `text;`) so notes like unique index descriptions do not pollute the output.
-- walks every connector (`edge="1"`) and emits `{start_table, start_column, end_table, end_column}` dictionaries, dropping the edge entirely when either endpoint cannot be mapped to a table/column.
+- walks every connector (`edge="1"`) so even visually-connected-but-unmapped edges show up in the log; only edges with a resolved start table/column and target table are written to the YAML.
+- emits FK-config-style YAML compatible with `erd_generator.fk_config`, grouping foreign keys by source table (only the edges with enough metadata make it into the file).
+- prints warnings/informational logs for missing tables/columns so you can patch up the generated YAML manually if needed.
 
 ## Supported SQL Snippets
 The parser targets a practical subset of PostgreSQL DDL with predictable formatting. Currently handled constructs include:

@@ -1,18 +1,118 @@
 #!/usr/bin/env python3
-"""CLI to extract table/column edge mappings from a draw.io XML file."""
+"""CLI to extract draw.io connections and emit FK-config-style YAML."""
 from __future__ import annotations
 
 import argparse
-import json
+import logging
 import sys
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, Iterable, List, Sequence, Tuple
+
+import yaml
 
 from erd_generator.drawio_parser import parse_drawio_edges
 
+FATAL_ISSUES = {"missing start table", "missing start column", "missing end table"}
 
-def main() -> int:
+
+@dataclass(frozen=True)
+class EdgeAnomaly:
+    index: int
+    edge: Dict[str, str]
+    issues: Tuple[str, ...]
+    fatal: bool
+
+
+def _format_endpoint(table: str, column: str) -> str:
+    if table and column:
+        return f"{table}.{column}"
+    if table:
+        return table
+    if column:
+        return f"[column:{column}]"
+    return "<unresolved>"
+
+
+def _describe_edge(edge: Dict[str, str]) -> str:
+    return f"{_format_endpoint(edge.get('start_table', ''), edge.get('start_column', ''))} -> " \
+        f"{_format_endpoint(edge.get('end_table', ''), edge.get('end_column', ''))}"
+
+
+def _detect_anomalies(edges: Sequence[Dict[str, str]]) -> List[EdgeAnomaly]:
+    anomalies: List[EdgeAnomaly] = []
+    for idx, edge in enumerate(edges, start=1):
+        start_table = (edge.get("start_table") or "").strip()
+        start_column = (edge.get("start_column") or "").strip()
+        end_table = (edge.get("end_table") or "").strip()
+        end_column = (edge.get("end_column") or "").strip()
+
+        issues: List[str] = []
+        if not start_table:
+            issues.append("missing start table")
+        if start_table and not start_column:
+            issues.append("missing start column")
+        if not end_table:
+            issues.append("missing end table")
+        if end_table and not end_column:
+            issues.append("missing end column")
+
+        if issues:
+            fatal = any(issue in FATAL_ISSUES for issue in issues)
+            anomalies.append(EdgeAnomaly(index=idx, edge=edge, issues=tuple(issues), fatal=fatal))
+    return anomalies
+
+
+def _build_fk_config(edges: Sequence[Dict[str, str]], skip_indices: Iterable[int]) -> dict:
+    skip = set(skip_indices)
+    config: "OrderedDict[str, dict[str, List[List[str]]]]" = OrderedDict()
+    for idx, edge in enumerate(edges, start=1):
+        if idx in skip:
+            continue
+        start_table = (edge.get("start_table") or "").strip()
+        start_column = (edge.get("start_column") or "").strip()
+        end_table = (edge.get("end_table") or "").strip()
+        end_column = (edge.get("end_column") or "").strip()
+        if not start_table or not start_column or not end_table:
+            continue  # safety net; should already be captured in skip set
+        table_entry = config.setdefault(start_table, {"fks": []})
+        fk_entry: List[str] = [start_column, end_table]
+        if end_column:
+            fk_entry.append(end_column)
+        table_entry["fks"].append(fk_entry)
+    return config
+
+
+def _setup_logging(level: str) -> None:
+    logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO), format="%(levelname)s: %(message)s")
+
+
+def _log_anomalies(anomalies: Sequence[EdgeAnomaly]) -> None:
+    if not anomalies:
+        logging.info("No parse anomalies detected.")
+        return
+    fatal = [a for a in anomalies if a.fatal]
+    non_fatal = [a for a in anomalies if not a.fatal]
+    for anomaly in anomalies:
+        log_fn = logging.warning if anomaly.fatal else logging.info
+        log_fn(
+            "Edge %d %s issues: %s",
+            anomaly.index,
+            _describe_edge(anomaly.edge),
+            ", ".join(anomaly.issues),
+        )
+    logging.info(
+        "Detected %d edges with issues (%d fatal, %d non-fatal).",
+        len(anomalies),
+        len(fatal),
+        len(non_fatal),
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Parse a draw.io (.drawio) XML file and emit table/column edges as JSON."
+        description="Parse a draw.io (.drawio) XML file and emit FK-config-style YAML."
     )
     parser.add_argument(
         "drawio_file",
@@ -20,20 +120,28 @@ def main() -> int:
         help="Path to the .drawio XML file to parse",
     )
     parser.add_argument(
-        "--indent",
-        type=int,
-        default=2,
-        help="JSON indentation (default: 2, set to 0 for compact output)",
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Verbosity for anomaly logging (default: INFO).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if not args.drawio_file.exists():
         parser.error(f"File not found: {args.drawio_file}")
 
+    _setup_logging(args.log_level)
+
     edges = parse_drawio_edges(str(args.drawio_file))
-    indent = None if args.indent <= 0 else args.indent
-    json.dump(edges, sys.stdout, ensure_ascii=False, indent=indent)
-    sys.stdout.write("\n")
+    anomalies = _detect_anomalies(edges)
+    _log_anomalies(anomalies)
+
+    fatal_indices = [a.index for a in anomalies if a.fatal]
+    config = _build_fk_config(edges, fatal_indices)
+
+    if not config:
+        logging.error("No usable edges were detected; FK config YAML will be empty.")
+    yaml.safe_dump(config, sys.stdout, sort_keys=False, allow_unicode=True)
     return 0
 
 
