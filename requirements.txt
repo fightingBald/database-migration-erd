@@ -1,3 +1,4 @@
 sqlglot
 networkx
 PyYAML
+pydot

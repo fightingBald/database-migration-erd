@@ -35,6 +35,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--fk-config",
         help="Optional YAML file describing additional foreign key links to inject before rendering.",
     )
+    parser.add_argument(
+        "--layout",
+        choices=["grid", "graphviz"],
+        default="grid",
+        help="Layout algorithm to position tables (default: grid).",
+    )
+    parser.add_argument(
+        "--graphviz-prog",
+        default="dot",
+        help="Graphviz engine to use when --layout graphviz (default: dot).",
+    )
+    parser.add_argument(
+        "--graphviz-scale",
+        type=float,
+        default=1.0,
+        help="Scale factor applied to Graphviz coordinates; increase for more spacing (default: 1.0).",
+    )
     return parser
 
 
@@ -78,7 +95,12 @@ def run_cli(args: argparse.Namespace) -> int:
         print("No tables detected. Check your migration path or SQL dialect support.", file=sys.stderr)
         return 1
 
-    layout_config = LayoutConfig(per_row=args.per_row)
+    layout_config = LayoutConfig(
+        per_row=args.per_row,
+        layout_algorithm=args.layout,
+        graphviz_prog=args.graphviz_prog,
+        graphviz_scale=args.graphviz_scale,
+    )
     tree = build_drawio(schema, show_types=args.show_types, layout_config=layout_config)
 
     try:

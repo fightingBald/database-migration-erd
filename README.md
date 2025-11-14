@@ -8,6 +8,7 @@
 - Normalises identifiers so cross-file foreign keys resolve reliably.
 - Produces draw.io XML using the built-in `table` shape with PK markers, optional data types, and a constraint note beneath each table (primary key, foreign keys, indexes).
 - Auto-layered layout groups related tables (following foreign-key levels) with generous spacing; tweak via `--per-row` if needed.
+- Optional Graphviz-powered layout (`--layout graphviz`) reduces overlap by delegating positioning to Graphviz (falls back to the grid layout if the dependency is missing).
 - Built on top of [sqlglot](https://github.com/tobymao/sqlglot) for robust PostgreSQL DDL parsing and [NetworkX](https://networkx.org/) for graph-aware layout ordering.
 - Emits per-run warnings for unsupported SQL (e.g. dialect gaps) and can archive them as timestamped files for later inspection.
 - Understands inline foreign key hints written as comments (e.g. `-- FK public.users(id)`), which is handy when referential integrity lives in the application layer.
@@ -22,6 +23,7 @@ python3 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
+> Graphviz layout mode requires the `graphviz` system package plus either PyGraphviz or pydot (the latter is listed in `requirements.txt`). If the `dot` binary is missing, the CLI falls back to the default grid layout automatically.
 
 ## 💡 Usage Example In This Repository (with sample migrations and files)
 You could use this example generated `schema.drawio` from the sample migrations in `./db/migration` and includes foreign key hints from `sample_fk_config.yaml`, to see what it gives and check the result(drag and drop the generated `./schema.drawio` ) in the drawIO website 
@@ -33,9 +35,22 @@ python3 gen_drawio_erd_table.py \
   --out ./schema.drawio \
   --show-types \
   --per-row 0 \
+  --layout grid \
   --log-dir . \
   --fk-config sample_fk_config.yaml
 ```
+Switch to Graphviz layout (with extra spacing) like so:
+```bash
+python3 gen_drawio_erd_table.py \
+  --migrations ./db/migration \
+  --out ./schema.drawio \
+  --show-types \
+  --layout graphviz \
+  --graphviz-scale 1.5 \
+  --fk-config sample_fk_config.yaml
+```
+The default Graphviz engine is `dot`. Use `--graphviz-prog neato` (or any other Graphviz binary) to experiment with different layouts.
+> Graphviz 负责把节点自动排布，但在强互联或超大图中依然可能产生交叉或重叠。可以通过 `--graphviz-scale`、`--graphviz-prog` 或者回退 `--layout grid --per-row ...` 来微调；必要时在 draw.io 里手动调整。
 
 Arguments:
 - `--migrations`: root directory containing migration SQL files.
@@ -115,6 +130,7 @@ Unsupported-but-common features (handled as no-ops) include `SET/DROP DEFAULT`, 
 - Multi-column foreign keys draw one connector per column pair when both sides are provided; if the SQL omits or mismatches reference columns we fall back to a single edge.
 - Advanced ALTER patterns (e.g. ALTER COLUMN SET DEFAULT, CHECK constraints, expression indexes, function-based index column rewrites) are ignored; apply them manually if needed.
 - Views, enums, and other object types are ignored.
+- Graphviz 布局依赖本地 Graphviz 可执行文件与 PyGraphviz/pydot；在图非常复杂时仍可能出现交叉，需要配合 `--graphviz-scale`、`--graphviz-prog` 或后期在 draw.io 中手调。
 
 ## Development Notes
 - Run `python3 gen_drawio_erd_table.py --help` to see the latest CLI options.

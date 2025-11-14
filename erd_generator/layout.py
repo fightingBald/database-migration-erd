@@ -2,13 +2,16 @@
 """Layout helpers deciding where each table should be rendered."""
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple, Callable
 
 import networkx as nx
 
 from .schema import Schema, Table, describe_table_notes
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,9 @@ class LayoutConfig:
     gap_y: int = 200
     index_note_margin: int = 12
     index_note_line_height: int = 16
+    layout_algorithm: str = "grid"
+    graphviz_prog: str = "dot"
+    graphviz_scale: float = 1.0
 
 
 @dataclass
@@ -96,6 +102,22 @@ def layout_tables(schema: Schema, config: LayoutConfig | None = None) -> List[Ta
         name: calculate_note_height(table, config) for name, table in schema.items()
     }
 
+    algorithm = (config.layout_algorithm or "grid").lower()
+    if algorithm == "graphviz":
+        layouts = _layout_with_graphviz(schema, config, table_heights, note_info)
+        if layouts:
+            return layouts
+        LOGGER.warning("Graphviz layout unavailable or failed; falling back to grid layout.")
+
+    return _layout_with_grid(schema, config, table_heights, note_info)
+
+
+def _layout_with_grid(
+    schema: Schema,
+    config: LayoutConfig,
+    table_heights: Dict[str, float],
+    note_info: Dict[str, tuple[List[str], float]],
+) -> List[TableLayout]:
     levels = _build_levels(schema)
     tables_by_level: Dict[int, List[str]] = {}
     for name, level in levels.items():
@@ -143,4 +165,71 @@ def layout_tables(schema: Schema, config: LayoutConfig | None = None) -> List[Ta
             )
         current_y += row_height + config.gap_y
 
+    return layouts
+
+
+def _resolve_graphviz_layout() -> Optional[Callable[..., Dict[str, Tuple[float, float]]]]:
+    try:
+        from networkx.drawing.nx_agraph import graphviz_layout as resolver
+
+        return resolver
+    except ImportError:
+        try:
+            from networkx.drawing.nx_pydot import graphviz_layout as resolver
+
+            return resolver
+        except ImportError:
+            return None
+
+
+def _layout_with_graphviz(
+    schema: Schema,
+    config: LayoutConfig,
+    table_heights: Dict[str, float],
+    note_info: Dict[str, tuple[List[str], float]],
+) -> List[TableLayout]:
+    resolver = _resolve_graphviz_layout()
+    if resolver is None:
+        LOGGER.debug("PyGraphviz/pydot not available; cannot use Graphviz layout.")
+        return []
+    graph = nx.DiGraph()
+    graph.add_nodes_from(schema.keys())
+    for table_name, table in schema.items():
+        for fk in table.foreign_keys:
+            if fk.ref_table in schema:
+                graph.add_edge(table_name, fk.ref_table)
+                graph.add_edge(fk.ref_table, table_name)
+    if not graph.nodes:
+        return []
+    try:
+        raw_positions = resolver(graph, prog=config.graphviz_prog or "dot")
+    except Exception as exc:  # pragma: no cover - depends on local Graphviz install
+        LOGGER.debug("Graphviz layout failed with %s: %s", config.graphviz_prog, exc)
+        return []
+    if not raw_positions:
+        return []
+
+    xs = [pos[0] for pos in raw_positions.values()]
+    ys = [pos[1] for pos in raw_positions.values()]
+    min_x = min(xs)
+    max_y = max(ys)
+    scale = config.graphviz_scale or 1.0
+
+    layouts: List[TableLayout] = []
+    for table_name, table in schema.items():
+        raw_x, raw_y = raw_positions.get(table_name, (min_x, max_y))
+        x = config.padding_x + (raw_x - min_x) * scale
+        y = config.padding_y + (max_y - raw_y) * scale
+        note_lines, note_height = note_info[table_name]
+        layouts.append(
+            TableLayout(
+                table=table,
+                x=float(x),
+                y=float(y),
+                width=float(config.table_width),
+                height=table_heights[table_name],
+                note_lines=note_lines,
+                note_height=note_height,
+            )
+        )
     return layouts
