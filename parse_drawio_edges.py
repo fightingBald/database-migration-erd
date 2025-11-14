@@ -17,15 +17,11 @@ from erd_generator.drawio_parser import parse_drawio_edges
 FATAL_ISSUES = {"missing start table", "missing start column", "missing end table"}
 
 
-def _register_ordered_dict():
-    from yaml.representer import SafeRepresenter
+def _register_ordered_dict() -> None:
     try:
         yaml.add_representer(
             OrderedDict,
-            lambda dumper, data: dumper.represent_mapping(
-                SafeRepresenter.DEFAULT_MAPPING_TAG,
-                data.items(),
-            ),
+            lambda dumper, data: dumper.represent_dict(data.items()),
             Dumper=yaml.SafeDumper,
         )
     except Exception:
