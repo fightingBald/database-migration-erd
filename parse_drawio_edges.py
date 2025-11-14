@@ -17,11 +17,24 @@ from erd_generator.drawio_parser import parse_drawio_edges
 FATAL_ISSUES = {"missing start table", "missing start column", "missing end table"}
 
 
+class FlowList(list):
+    """List that should be emitted in YAML flow style (e.g. `[a, b, c]`)."""
+
+
 def _register_ordered_dict() -> None:
     try:
         yaml.add_representer(
             OrderedDict,
             lambda dumper, data: dumper.represent_dict(data.items()),
+            Dumper=yaml.SafeDumper,
+        )
+        yaml.add_representer(
+            FlowList,
+            lambda dumper, data: dumper.represent_sequence(
+                "tag:yaml.org,2002:seq",
+                data,
+                flow_style=True,
+            ),
             Dumper=yaml.SafeDumper,
         )
     except Exception:
@@ -94,7 +107,7 @@ def _build_fk_config(edges: Sequence[Dict[str, str]]) -> dict:
         end_table = _value_or_placeholder(edge.get("end_table"), idx, "end_table")
         end_column = _value_or_placeholder(edge.get("end_column"), idx, "end_column")
         table_entry = config.setdefault(start_table, {"fks": []})
-        table_entry["fks"].append([start_column, end_table, end_column])
+        table_entry["fks"].append(FlowList([start_column, end_table, end_column]))
     return config
 
 
