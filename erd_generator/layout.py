@@ -198,7 +198,6 @@ def _layout_with_graphviz(
     for table_name, table in schema.items():
         for fk in table.foreign_keys:
             if fk.ref_table in schema:
-                graph.add_edge(table_name, fk.ref_table)
                 graph.add_edge(fk.ref_table, table_name)
     if not graph.nodes:
         return []
