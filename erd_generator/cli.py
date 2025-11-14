@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Scale factor applied to Graphviz coordinates; increase for more spacing (default: 1.0).",
     )
+    parser.add_argument(
+        "--graphviz-spacing",
+        type=float,
+        default=200.0,
+        help="Additional uniform spacing (in draw.io units) added to Graphviz coordinates to reduce overlap (default: 200).",
+    )
     return parser
 
 
@@ -100,6 +106,7 @@ def run_cli(args: argparse.Namespace) -> int:
         layout_algorithm=args.layout,
         graphviz_prog=args.graphviz_prog,
         graphviz_scale=args.graphviz_scale,
+        graphviz_spacing=args.graphviz_spacing,
     )
     tree = build_drawio(schema, show_types=args.show_types, layout_config=layout_config)
 

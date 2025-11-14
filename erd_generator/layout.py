@@ -29,6 +29,7 @@ class LayoutConfig:
     layout_algorithm: str = "grid"
     graphviz_prog: str = "dot"
     graphviz_scale: float = 1.0
+    graphviz_spacing: float = 200.0
 
 
 @dataclass
@@ -214,12 +215,13 @@ def _layout_with_graphviz(
     min_x = min(xs)
     max_y = max(ys)
     scale = config.graphviz_scale or 1.0
+    spacing = max(0.0, config.graphviz_spacing)
 
     layouts: List[TableLayout] = []
     for table_name, table in schema.items():
         raw_x, raw_y = raw_positions.get(table_name, (min_x, max_y))
-        x = config.padding_x + (raw_x - min_x) * scale
-        y = config.padding_y + (max_y - raw_y) * scale
+        x = config.padding_x + (raw_x - min_x) * scale + spacing
+        y = config.padding_y + (max_y - raw_y) * scale + spacing
         note_lines, note_height = note_info[table_name]
         layouts.append(
             TableLayout(

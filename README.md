@@ -47,9 +47,10 @@ python3 gen_drawio_erd_table.py \
   --show-types \
   --layout graphviz \
   --graphviz-scale 1.5 \
+  --graphviz-spacing 300 \
   --fk-config sample_fk_config.yaml
 ```
-The default Graphviz engine is `dot`. Use `--graphviz-prog neato` (or any other Graphviz binary) to experiment with different layouts.
+The default Graphviz engine is `dot`. Use `--graphviz-prog neato` (or any other Graphviz binary) to experiment with different layouts, and `--graphviz-spacing` to add extra padding between nodes when needed.
 > Graphviz 负责把节点自动排布，但在强互联或超大图中依然可能产生交叉或重叠。可以通过 `--graphviz-scale`、`--graphviz-prog` 或者回退 `--layout grid --per-row ...` 来微调；必要时在 draw.io 里手动调整。
 
 Arguments:
