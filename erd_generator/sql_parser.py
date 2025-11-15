@@ -408,12 +408,28 @@ def _handle_create_index(statement: exp.Create, schema: Schema) -> None:
     table.add_index(index)
 
 
-def _handle_create(statement: exp.Create, schema: Schema, raw_sql: Optional[str] = None) -> None:
+def _handle_create(
+    statement: exp.Create,
+    schema: Schema,
+    raw_sql: Optional[str] = None,
+    *,
+    source: Optional[str] = None,
+    failures: Optional[List[ParseFailure]] = None,
+) -> None:
     kind = (statement.args.get("kind") or "").upper()
-    if kind == "TABLE":
+    has_expression = statement.args.get("expression") is not None
+    if kind == "TABLE" and not has_expression:
         _handle_create_table(statement, schema, raw_sql)
     elif kind == "INDEX":
         _handle_create_index(statement, schema)
+    else:
+        snippet = raw_sql or statement.sql(dialect="postgres")
+        _record_failure(
+            failures,
+            source,
+            snippet,
+            f"Unsupported CREATE {kind or 'statement'}",
+        )
 
 
 def _handle_drop_table(table_name: str, schema: Schema) -> None:
@@ -618,7 +634,13 @@ def parse_schema_from_sql(
             continue
         for statement in expressions:
             if isinstance(statement, exp.Create):
-                _handle_create(statement, schema, raw_statement)
+                _handle_create(
+                    statement,
+                    schema,
+                    raw_statement,
+                    source=source,
+                    failures=failures,
+                )
             elif isinstance(statement, exp.Alter):
                 _handle_alter(statement, schema)
             elif isinstance(statement, exp.Drop):
