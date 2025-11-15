@@ -365,13 +365,29 @@ def _handle_create_table(statement: exp.Create, schema: Schema, raw_sql: Optiona
     table.sync_primary_key_flags()
 
 
-def _handle_create_index(statement: exp.Create, schema: Schema) -> None:
+def _handle_create_index(
+    statement: exp.Create,
+    schema: Schema,
+    *,
+    source: Optional[str] = None,
+    failures: Optional[List[ParseFailure]] = None,
+) -> None:
     index_expr = statement.this
     if not isinstance(index_expr, exp.Index):
         return
 
     table_name = _table_name(index_expr.args.get("table"))
-    table = schema.setdefault(table_name, Table(name=table_name))
+    if not table_name:
+        return
+    table = schema.get(table_name)
+    if table is None:
+        _record_failure(
+            failures,
+            source,
+            statement.sql(dialect="postgres"),
+            f"Index references unknown table '{table_name}'",
+        )
+        return
 
     params = index_expr.args.get("params")
     column_items = params.args.get("columns") if isinstance(params, exp.IndexParameters) else None
@@ -421,7 +437,7 @@ def _handle_create(
     if kind == "TABLE" and not has_expression:
         _handle_create_table(statement, schema, raw_sql)
     elif kind == "INDEX":
-        _handle_create_index(statement, schema)
+        _handle_create_index(statement, schema, source=source, failures=failures)
     else:
         snippet = raw_sql or statement.sql(dialect="postgres")
         _record_failure(
