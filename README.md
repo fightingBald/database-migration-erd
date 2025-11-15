@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ```
 > Graphviz layout mode requires the `graphviz` system package plus either PyGraphviz or pydot (the latter is listed in `requirements.txt`). If the `dot` binary is missing, the CLI falls back to the default grid layout automatically.
 
-## 💡 Usage Example In This Repository (with sample migrations and files)
+## Usage Example In This Repository (with sample migrations and files)
 You could use this example generated `schema.drawio` from the sample migrations in `./db/migration` and includes foreign key hints from `sample_fk_config.yaml`, to see what it gives and check the result(drag and drop the generated `./schema.drawio` ) in the drawIO website 
 
 **REPLACE THE PATHS AS NEEDED**:
@@ -51,7 +51,7 @@ python3 gen_drawio_erd_table.py \
   --fk-config sample_fk_config.yaml
 ```
 The default Graphviz engine is `dot`. Use `--graphviz-prog neato` (or any other Graphviz binary) to experiment with different layouts, and `--graphviz-spacing` to add extra padding between nodes when needed.
-> Graphviz 负责把节点自动排布，但在强互联或超大图中依然可能产生交叉或重叠。可以通过 `--graphviz-scale`、`--graphviz-prog` 或者回退 `--layout grid --per-row ...` 来微调；必要时在 draw.io 里手动调整。
+> Graphviz handles node placement automatically, but densely connected or very large diagrams can still produce overlaps. Adjust `--graphviz-scale`, pick a different program via `--graphviz-prog`, or fall back to `--layout grid --per-row ...`; worst case, tidy things manually inside draw.io.
 
 Arguments:
 - `--migrations`: root directory containing migration SQL files.
@@ -61,7 +61,7 @@ Arguments:
 - `--log-dir`: optional base directory for parse logs; the tool writes to `<log-dir>/parse_log/parse_failures_<timestamp>.log` (default root: current working directory).
 - `--fk-config`: optional YAML file providing extra foreign-key relationships to inject before rendering.
 
-### ✅ Foreign key relation support when in DB level there's no foreign keys explicitly defined
+### Foreign key relation support when in DB level there's no foreign keys explicitly defined
 
 When database-level foreign keys are omitted, there are three ways to keep relationships intact:
 
@@ -116,6 +116,19 @@ The parser:
 - emits FK-config-style YAML compatible with `erd_generator.fk_config`, grouping foreign keys by source table (every edge is included, even when placeholders are needed).
 - prints warnings/informational logs for missing tables/columns and writes a companion text report (`<diagram>.edge_anomalies.log`, override with `--failure-log`) enumerating the problematic edges for manual cleanup.
 
+## Compare draw.io diagrams with migrations
+Need to verify that the diagram stays in sync with the migrations? Run the comparator CLI:
+
+```bash
+python3 compare_drawio_to_migrations.py ./db/migration ./schema.drawio --out schema_diff.txt
+```
+
+The generated text report highlights:
+- tables that exist only in migrations or only in the diagram
+- missing/extra columns per shared table
+- foreign keys present in one source but not the other (based on the FK note block under each table)
+- index differences derived from the same note block
+
 ## Supported SQL Snippets
 The parser targets a practical subset of PostgreSQL DDL with predictable formatting. Currently handled constructs include:
 - `CREATE TABLE` with inline / table-level `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` definitions.
@@ -126,12 +139,11 @@ The parser targets a practical subset of PostgreSQL DDL with predictable formatt
 
 Unsupported-but-common features (handled as no-ops) include `SET/DROP DEFAULT`, `CHECK` constraints, partition syntax, and rewriting expression definitions during renames.
 
-## ⚠️Known Limitations
+## Known Limitations
 - Only a small SQL subset is supported (PostgreSQL DDL). Exotic syntax, quoted identifiers with spaces, and database-specific extensions may require manual adjustments.
 - Multi-column foreign keys draw one connector per column pair when both sides are provided; if the SQL omits or mismatches reference columns we fall back to a single edge.
 - Advanced ALTER patterns (e.g. ALTER COLUMN SET DEFAULT, CHECK constraints, expression indexes, function-based index column rewrites) are ignored; apply them manually if needed.
 - Views, enums, and other object types are ignored.
-- Graphviz 布局依赖本地 Graphviz 可执行文件与 PyGraphviz/pydot；在图非常复杂时仍可能出现交叉，需要配合 `--graphviz-scale`、`--graphviz-prog` 或后期在 draw.io 中手调。
 
 ## Development Notes
 - Run `python3 gen_drawio_erd_table.py --help` to see the latest CLI options.
