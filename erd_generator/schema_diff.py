@@ -7,7 +7,7 @@ from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
 from .drawio_parser import DiagramTable, parse_drawio_tables
 from .schema import Schema, Table
-from .sql_parser import load_schema_from_migrations
+from .sql_parser import get_last_parse_failures, load_schema_from_migrations
 
 
 def _normalize_identifier(value: str) -> str:
@@ -286,16 +286,79 @@ def generate_diff_report(migration_snapshot: SchemaSnapshot, drawio_snapshot: Sc
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _snapshot_debug_lines(snapshot: SchemaSnapshot) -> List[str]:
+    lines: List[str] = []
+    for key in sorted(snapshot.tables):
+        table = snapshot.tables[key]
+        lines.append(f"- {table.name} (key={key})")
+        if table.columns:
+            lines.append(f"    Columns: {', '.join(sorted(table.columns))}")
+        else:
+            lines.append("    Columns: (none)")
+        if table.foreign_keys:
+            fk_lines = [
+                _format_fk("", fk)[2:].strip()
+                for fk in sorted(table.foreign_keys, key=lambda item: (item.ref_table, item.local_columns))
+            ]
+            lines.append(f"    Foreign keys: {'; '.join(fk_lines)}")
+        else:
+            lines.append("    Foreign keys: (none)")
+        if table.indexes:
+            idx_lines = [
+                _format_index("", idx)[2:].strip()
+                for idx in sorted(table.indexes, key=lambda item: (item.columns, item.unique, item.where))
+            ]
+            lines.append(f"    Indexes: {'; '.join(idx_lines)}")
+        else:
+            lines.append("    Indexes: (none)")
+    return lines
+
+
+def _emit_debug_info(
+    migration_snapshot: SchemaSnapshot,
+    drawio_snapshot: SchemaSnapshot,
+) -> None:
+    import sys
+
+    sys.stderr.write("=== Migration schema snapshot ===\n")
+    migration_lines = _snapshot_debug_lines(migration_snapshot)
+    if migration_lines:
+        sys.stderr.write("\n".join(migration_lines) + "\n")
+    else:
+        sys.stderr.write("(no tables parsed)\n")
+    sys.stderr.write("\n=== SQL parse failures ===\n")
+    failures = get_last_parse_failures()
+    if failures:
+        for failure in failures:
+            location = failure.source or "<input>"
+            sys.stderr.write(f"{location}: {failure.reason}: {failure.sql}\n")
+    else:
+        sys.stderr.write("(none)\n")
+    sys.stderr.write("\n=== Draw.io snapshot ===\n")
+    drawio_lines = _snapshot_debug_lines(drawio_snapshot)
+    if drawio_lines:
+        sys.stderr.write("\n".join(drawio_lines) + "\n")
+    else:
+        sys.stderr.write("(no tables parsed)\n")
+
+
 def run_diff_cli(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Compare migration SQL schemas with a draw.io diagram.")
     parser.add_argument("migrations", help="Path to the root of migration SQL files")
     parser.add_argument("drawio", help="Path to the draw.io (.drawio) file to compare")
     parser.add_argument("--out", help="Optional path to write the diff report (defaults to stdout)")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print parsed tables and SQL parse failures to stderr for troubleshooting",
+    )
     args = parser.parse_args(argv)
 
     migration_schema = load_schema_from_migrations(args.migrations)
     migration_snapshot = snapshot_from_schema(migration_schema)
     drawio_snapshot = snapshot_from_drawio(args.drawio)
+    if args.debug:
+        _emit_debug_info(migration_snapshot, drawio_snapshot)
     report = generate_diff_report(migration_snapshot, drawio_snapshot)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as handle:

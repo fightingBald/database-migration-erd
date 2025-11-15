@@ -123,6 +123,12 @@ Need to verify that the diagram stays in sync with the migrations? Run the compa
 python3 compare_drawio_to_migrations.py ./db/migration ./schema.drawio --out schema_diff.txt
 ```
 
+Add `--debug` to print the parsed table lists (from migrations and the diagram) plus any SQL parse failures to stderr when you need to troubleshoot mismatches:
+
+```bash
+python3 compare_drawio_to_migrations.py ./db/migration ./schema.drawio --out schema_diff.txt --debug
+```
+
 The generated text report highlights:
 - tables that exist only in migrations or only in the diagram
 - missing/extra columns per shared table
