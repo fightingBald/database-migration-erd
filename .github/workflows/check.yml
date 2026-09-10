@@ -1,0 +1,37 @@
+name: Check ERD generation
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Install verified D2 0.7.1 with bundled ELK
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/d2-v0.7.1-linux-amd64.tar.gz"
+          curl --fail --location --retry 2 \
+            https://github.com/d2lang/d2/releases/download/v0.7.1/d2-v0.7.1-linux-amd64.tar.gz \
+            --output "$archive"
+          echo "eb172adf59f38d1e5a70ab177591356754ffaf9bebb84e0ca8b767dfb421dad7  $archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/d2-v0.7.1/bin" >> "$GITHUB_PATH"
+      - name: Build, fast tests and lint
+        run: make build test lint PYTHON=python
+      - name: Verify real ELK rendering and default workflow
+        run: make test-integration run PYTHON=python

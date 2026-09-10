@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+generated/
+build/
+parse_log/
+*.edge_anomalies.log
+.DS_Store

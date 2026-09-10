@@ -5,8 +5,8 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Optional, Tuple
 from xml.sax.saxutils import escape
 
-from .layout import LayoutConfig, TableLayout, layout_tables
-from .schema import Column, ForeignKey, Schema, Table
+from .layout import LayoutConfig, layout_tables
+from .schema import Column, Schema, Table
 
 
 class IdGenerator:

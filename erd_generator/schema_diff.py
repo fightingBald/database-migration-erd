@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
@@ -110,7 +111,7 @@ def _parse_fk_note(line: str) -> ForeignKeySummary | None:
     target_part = target_part.strip()
     ref_columns: Tuple[str, ...]
     if "." in target_part:
-        table_part, column_part = target_part.split(".", 1)
+        table_part, column_part = target_part.rsplit(".", 1)
         ref_table = _normalize_identifier(table_part)
         ref_columns = tuple(
             _normalize_identifier(chunk)
@@ -151,7 +152,11 @@ def _parse_index_note(line: str) -> IndexSummary | None:
 
 
 def _table_columns_from_diagram(table: DiagramTable) -> Set[str]:
-    return {_normalize_identifier(column) for column in table.columns if column}
+    # Generated --show-types labels append a parenthesized SQL type.
+    return {
+        _normalize_identifier(re.sub(r"^([\w$]+)\s+\(.+\)$", r"\1", column))
+        for column in table.columns if column
+    }
 
 
 def _table_foreign_keys_from_diagram(table: DiagramTable) -> Set[ForeignKeySummary]:

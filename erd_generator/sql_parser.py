@@ -1,23 +1,24 @@
 """SQL parsing helpers backed by sqlglot."""
 from __future__ import annotations
 
-import glob
-import os
+import logging
 import re
 from dataclasses import dataclass
-from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
 
+from .diagnostics import ParseFailure
 from .schema import (
     Column,
     ForeignKey,
     Index,
     Schema,
     Table,
+    drop_column_in_schema,
     rename_column_in_schema,
     rename_table,
 )
@@ -99,13 +100,6 @@ def _expression_sql(node: Optional[exp.Expression]) -> str:
 # Failure tracking
 
 
-@dataclass(frozen=True)
-class ParseFailure:
-    source: Optional[str]
-    sql: str
-    reason: str
-
-
 _LAST_PARSE_FAILURES: List[ParseFailure] = []
 
 
@@ -121,12 +115,15 @@ def _record_failure(
     source: Optional[str],
     sql_text: str,
     reason: str,
+    *,
+    line: Optional[int] = None,
 ) -> None:
     snippet = _clean_sql_snippet(sql_text)
     location = source or "<input>"
-    print(f"[WARN] {reason} in {location}: {snippet}")
     if failures is not None:
-        failures.append(ParseFailure(source=source, sql=snippet, reason=reason))
+        failures.append(ParseFailure(source=source, sql=snippet, reason=reason, line=line))
+    else:
+        logging.getLogger(__name__).warning("SQL parse: %s: %s", location, reason)
 
 
 # ---------------------------------------------------------------------------
@@ -462,15 +459,29 @@ def _handle_drop_table(table_name: str, schema: Schema) -> None:
                 table.constraint_types.pop(fk.name.lower(), None)
 
 
+def _drop_targets(statement: exp.Drop) -> Sequence[exp.Expression]:
+    """sqlglot 30 stores DROP targets in tables, including columns/constraints."""
+    return statement.args.get("tables") or ([statement.this] if statement.this is not None else [])
+
+
+def _index_name_for_table(identifier: str, table: Table) -> Optional[str]:
+    if "." not in identifier:
+        return identifier
+    namespace, name = identifier.rsplit(".", 1)
+    return name if table.name.rpartition(".")[0] == namespace else None
+
+
 def _handle_drop(statement: exp.Drop, schema: Schema) -> None:
     kind = (statement.args.get("kind") or "").upper()
-    if kind == "TABLE":
-        _handle_drop_table(_table_name(statement.this), schema)
-    elif kind == "INDEX":
-        target_name = _table_name(statement.this)
-        for table in schema.values():
-            if table.drop_index(target_name):
-                break
+    for target in _drop_targets(statement):
+        if kind == "TABLE":
+            _handle_drop_table(_table_name(target), schema)
+        elif kind == "INDEX":
+            target_name = _table_name(target)
+            for table in schema.values():
+                index_name = _index_name_for_table(target_name, table)
+                if index_name and table.drop_index(index_name):
+                    break
 
 
 def _handle_alter_table(statement: exp.Alter, schema: Schema) -> None:
@@ -501,13 +512,14 @@ def _handle_alter_table(statement: exp.Alter, schema: Schema) -> None:
                     _apply_unique_constraint(current_table, expr, None)
         elif isinstance(action, exp.Drop):
             kind = (action.args.get("kind") or "").upper()
-            if kind == "COLUMN":
-                column_name = _column_name(action.this)
-                current_table.drop_column(column_name)
-            elif kind == "CONSTRAINT":
-                constraint_name = _table_name(action.this)
-                if constraint_name:
-                    current_table.drop_constraint(constraint_name)
+            for target in _drop_targets(action):
+                if kind == "COLUMN":
+                    drop_column_in_schema(schema, current_table_name, _column_name(target),
+                                          cascade=bool(action.args.get("cascade")))
+                elif kind == "CONSTRAINT":
+                    constraint_name = _table_name(target)
+                    if constraint_name:
+                        current_table.drop_constraint(constraint_name)
         elif isinstance(action, exp.RenameColumn):
             old_name = _column_name(action.this)
             new_name = _column_name(action.args.get("to"))
@@ -536,7 +548,8 @@ def _handle_alter_index(statement: exp.Alter, schema: Schema) -> None:
             if not new_name or new_name == current_name:
                 continue
             for table in schema.values():
-                if table.rename_index(current_name, new_name):
+                local_name = _index_name_for_table(current_name, table)
+                if local_name and table.rename_index(local_name, new_name):
                     current_name = new_name
                     break
 
@@ -637,15 +650,22 @@ def parse_schema_from_sql(
 ) -> None:
     if not sql.strip():
         return
+    cursor = 0
     for raw_statement in _split_sql_statements(sql):
+        offset = sql.find(raw_statement, cursor)
+        start_line = sql.count("\n", 0, offset) + 1
+        cursor = offset + len(raw_statement)
         try:
             expressions = sqlglot.parse(raw_statement, read="postgres")
         except (ParseError, TokenError) as exc:
+            errors = getattr(exc, "errors", [])
+            error_line = errors[0].get("line", 1) if errors else 1
             _record_failure(
                 failures,
                 source,
                 raw_statement,
                 f"Parse error ({exc.__class__.__name__})",
+                line=start_line + error_line - 1,
             )
             continue
         for statement in expressions:
@@ -663,31 +683,47 @@ def parse_schema_from_sql(
                 _handle_drop(statement, schema)
             elif isinstance(statement, exp.Command):
                 handled = _handle_command(statement, schema)
-                reason = "Parsed via generic command handler" if handled else "Unsupported SQL command"
-                _record_failure(
-                    failures,
-                    source,
-                    statement.sql(dialect="postgres"),
-                    reason,
-                )
+                if not handled:
+                    _record_failure(failures, source, raw_statement, "Unsupported SQL command")
     for table in schema.values():
         table.sync_primary_key_flags()
 
 
-def load_schema_from_migrations(path: str) -> Schema:
+@dataclass
+class SchemaLoadResult:
+    schema: Schema
+    failures: List[ParseFailure]
+
+
+def _migration_sort_key(path: Path) -> tuple:
+    match = re.match(r"^V(\d+(?:[._]\d+)*)(?:__|$)", path.stem, re.IGNORECASE)
+    if match:
+        return (0, tuple(int(part) for part in re.split(r"[._]", match.group(1))), str(path))
+    return (1, (), str(path))
+
+
+def load_schema_result(path: str) -> SchemaLoadResult:
+    """Load a single run without changing the compatibility diagnostic cache."""
+    root = Path(path).expanduser()
+    if not root.is_dir():
+        raise ValueError(f"migration input is not a directory: {root}")
+    files = sorted(root.rglob("*.sql"), key=_migration_sort_key)
+    if not files:
+        raise ValueError(f"migration directory contains no SQL files: {root}")
     schema: Schema = {}
+    failures: List[ParseFailure] = []
+    for file_path in files:
+        parse_schema_from_sql(file_path.read_text(encoding="utf-8"), schema,
+                              source=str(file_path), failures=failures)
+    return SchemaLoadResult(schema, failures)
+
+
+def load_schema_from_migrations(path: str) -> Schema:
     global _LAST_PARSE_FAILURES
     _LAST_PARSE_FAILURES = []
-    files = sorted(glob.glob(os.path.join(path, "**", "*.sql"), recursive=True))
-    for file_path in files:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            parse_schema_from_sql(
-                handle.read(),
-                schema,
-                source=file_path,
-                failures=_LAST_PARSE_FAILURES,
-            )
-    return schema
+    result = load_schema_result(path)
+    _LAST_PARSE_FAILURES = list(result.failures)
+    return result.schema
 
 
 def get_last_parse_failures() -> List[ParseFailure]:

@@ -123,7 +123,11 @@ class Table:
     def drop_column(self, column_name: str) -> None:
         target = column_name.lower()
         self.columns = [column for column in self.columns if column.name.lower() != target]
-        self.primary_key = {col for col in self.primary_key if col.lower() != target}
+        if target in {col.lower() for col in self.primary_key}:
+            self.primary_key.clear()
+            if self.primary_key_name:
+                self.constraint_types.pop(self.primary_key_name, None)
+            self.primary_key_name = None
         fk_names = {
             fk.name
             for fk in self.foreign_keys
@@ -135,11 +139,18 @@ class Table:
         for name in fk_names:
             if name:
                 self.constraint_types.pop(name.lower(), None)
+        removed_index_names = {
+            idx.name.lower()
+            for idx in self.indexes
+            if idx.name and any((col_name or "").lower() == target for col_name in idx.column_names)
+        }
         self.indexes = [
             idx
             for idx in self.indexes
             if all((col_name or "").lower() != target for col_name in idx.column_names)
         ]
+        for name in removed_index_names:
+            self.constraint_types.pop(name, None)
         if self.primary_key_name and self.primary_key_name not in self.constraint_types:
             self.primary_key_name = None
         self.sync_primary_key_flags()
@@ -286,6 +297,23 @@ def rename_column_in_schema(schema: Schema, table_name: str, old_name: str, new_
                 fk.ref_columns = tuple(
                     new_name if col.lower() == old_name.lower() else col for col in fk.ref_columns
                 )
+
+
+def drop_column_in_schema(schema: Schema, table_name: str, column_name: str, *, cascade: bool = False) -> None:
+    table = schema[table_name]
+    was_primary = column_name.lower() in {col.lower() for col in table.primary_key}
+    table.drop_column(column_name)
+    if not cascade:
+        return
+    for other in schema.values():
+        removed = [fk for fk in other.foreign_keys if fk.ref_table == table_name and (
+            column_name.lower() in {col.lower() for col in fk.ref_columns}
+            or (not fk.ref_columns and was_primary)
+        )]
+        other.foreign_keys = [fk for fk in other.foreign_keys if fk not in removed]
+        for fk in removed:
+            if fk.name:
+                other.constraint_types.pop(fk.name.lower(), None)
 
 
 def describe_table_notes(table: Table) -> List[str]:

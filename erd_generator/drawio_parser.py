@@ -5,7 +5,7 @@ import html
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
 import xml.etree.ElementTree as ET
 
 LABEL_TOKENS = {"pk", "fk"}

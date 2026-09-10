@@ -1,156 +1,225 @@
 # db_migraton_diagram_generator
-* Generate draw.io ERD diagrams directly from `YOUR_MIGRATION_FOLDER_FILEPATH` **(no DB connection required)**.
-* This project is aim to help the LAZY-ASS save the time to manually draw the ERD diagrams when you have a set of migration files.
-* The generated diagram could be DRAG and DROP directly in browser https://www.drawio.com/
 
-## Features
-- Parses `CREATE TABLE` (including inline/table-level PRIMARY KEY and FOREIGN KEY definitions) plus common `ALTER TABLE` statements (add/drop/alter columns, add/drop constraints, rename columns/tables/constraints).
-- Normalises identifiers so cross-file foreign keys resolve reliably.
-- Produces draw.io XML using the built-in `table` shape with PK markers, optional data types, and a constraint note beneath each table (primary key, foreign keys, indexes).
-- Auto-layered layout groups related tables (following foreign-key levels) with generous spacing; tweak via `--per-row` if needed.
-- Optional Graphviz-powered layout (`--layout graphviz`) reduces overlap by delegating positioning to Graphviz (falls back to the grid layout if the dependency is missing).
-- Built on top of [sqlglot](https://github.com/tobymao/sqlglot) for robust PostgreSQL DDL parsing and [NetworkX](https://networkx.org/) for graph-aware layout ordering.
-- Emits per-run warnings for unsupported SQL (e.g. dialect gaps) and can archive them as timestamped files for later inspection.
-- Understands inline foreign key hints written as comments (e.g. `-- FK public.users(id)`), which is handy when referential integrity lives in the application layer.
-- Draws foreign key connectors between the actual columns involved instead of generic table-to-table arrows for clearer attribute lineage.
+Generate ER diagrams from PostgreSQL migration SQL **without a database connection**.
+The primary workflow produces D2 source and renders SVG with D2's bundled ELK layout:
 
-## Installation
-Ensure Python 3.9+ is available; no packaging step is required.
+```text
+SQL migrations + optional FK YAML → Schema → schema.d2 → D2 / ELK → schema.svg
+```
 
-## Environment Setup
+The draw.io exporter, relationship extractor, comparator and existing Python APIs remain available through explicit compatibility commands.
+
+## Quick start
+
+Use Python **3.11+** and **D2 0.7.1**. Local validation used Python 3.14; CI is configured for 3.11 and 3.14. Rendering checks the exact D2 version to keep layout behavior reproducible.
+
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements-dev.txt
+
+# Install D2 0.7.1 from its official release, then verify it:
+d2 --version
+d2 layout elk
+
+# Generate generated/schema.d2 and generated/schema.svg from the sample migrations:
+make run
 ```
-> Graphviz layout mode requires the `graphviz` system package plus either PyGraphviz or pydot (the latter is listed in `requirements.txt`). If the `dot` binary is missing, the CLI falls back to the default grid layout automatically.
 
-## Usage Example In This Repository (with sample migrations and files)
-You could use this example generated `schema.drawio` from the sample migrations in `./db/migration` and includes foreign key hints from `sample_fk_config.yaml`, to see what it gives and check the result(drag and drop the generated `./schema.drawio` ) in the drawIO website 
+Download D2 from the [official 0.7.1 release](https://github.com/d2lang/d2/releases/tag/v0.7.1). ELK is included; no separate ELK service is needed. `requirements.txt` installs runtime dependencies; `requirements-dev.txt` also installs pytest and Ruff. The original dependency installation surface still includes NetworkX/pydot for draw.io compatibility, but the D2 path does not import them.
 
-**REPLACE THE PATHS AS NEEDED**:
+Open `generated/schema.svg` in a browser. Only producing `.d2` source requires no D2 executable:
+
 ```bash
-python3 gen_drawio_erd_table.py \
-  --migrations ./db/migration \
-  --out ./schema.drawio \
-  --show-types \
-  --per-row 0 \
-  --layout grid \
-  --log-dir . \
-  --fk-config sample_fk_config.yaml
+make gen
 ```
-Switch to Graphviz layout (with extra spacing) like so:
+
+## Generate your diagram
+
 ```bash
-python3 gen_drawio_erd_table.py \
+.venv/bin/python -m erd_generator \
   --migrations ./db/migration \
-  --out ./schema.drawio \
+  --out ./generated/schema.d2 \
   --show-types \
-  --layout graphviz \
-  --graphviz-scale 1.5 \
-  --graphviz-spacing 300 \
-  --fk-config sample_fk_config.yaml
+  --fk-config sample_fk_config.yaml \
+  --render svg
 ```
-The default Graphviz engine is `dot`. Use `--graphviz-prog neato` (or any other Graphviz binary) to experiment with different layouts, and `--graphviz-spacing` to add extra padding between nodes when needed.
-> Graphviz handles node placement automatically, but densely connected or very large diagrams can still produce overlaps. Adjust `--graphviz-scale`, pick a different program via `--graphviz-prog`, or fall back to `--layout grid --per-row ...`; worst case, tidy things manually inside draw.io.
 
-Arguments:
-- `--migrations`: root directory containing migration SQL files.
-- `--out`: where the `.drawio` document will be written.
-- `--show-types`: include column data types in the table rows.
-- `--per-row`: optional layout tuning; tables per row (default `0` = automatic based on graph).
-- `--log-dir`: optional base directory for parse logs; the tool writes to `<log-dir>/parse_log/parse_failures_<timestamp>.log` (default root: current working directory).
-- `--fk-config`: optional YAML file providing extra foreign-key relationships to inject before rendering.
+Omit `--render svg` to generate source only. The image always uses the same directory and filename stem as the `.d2` source. Generated files are overwritten by regeneration; edit migrations, FK configuration or generation options rather than the generated files.
 
-### Foreign key relation support when in DB level there's no foreign keys explicitly defined
+Make accepts equivalent overrides:
 
-When database-level foreign keys are omitted, there are three ways to keep relationships intact:
+```bash
+make run MIGRATIONS=/path/to/migrations SOURCE=generated/project.d2 FK_CONFIG=/path/to/fks.yaml
+make gen MIGRATIONS=/path/to/migrations FK_CONFIG=
+```
 
-- **Native DDL**: declared `FOREIGN KEY` constraints in your migration SQL are parsed automatically.
-- **Comment hints**: annotate the referencing column with a line comment in the form `-- FK schema.table(column[, ...])`. The parser is whitespace-tolerant, so formats like `-- FK  public.products ( id )` are accepted.
-- **YAML overrides**: supply an external map of relationships for legacy databases or application-managed integrity.
+| Option | Behavior |
+| --- | --- |
+| `--migrations PATH` | Required migration directory; scans SQL recursively |
+| `--out PATH` | Required `.d2` source output; `.drawio`/`.xml` for the legacy backend |
+| `--format d2\|drawio` | Module entrypoint defaults to `d2` |
+| `--show-types` | Display SQL column types; otherwise retain names and constraints |
+| `--fk-config PATH` | Add relationships declared in YAML |
+| `--layout elk` | D2 always uses ELK; draw.io accepts `grid` or `graphviz` |
+| `--direction right\|left\|up\|down` | Global D2 direction, default `right` |
+| `--render svg` | Render source with the pinned D2 CLI |
+| `--d2-binary PATH` | Rendering executable, default `d2`; requires `--render` |
+| `--render-timeout SECONDS` | Positive timeout per D2 process, default 120; requires `--render` |
+| `--force-appendix` | Display tooltip contents in the SVG appendix; requires `--render` |
+| `--log-dir PATH` | Write detected SQL/configuration diagnostics to `PATH/parse_log/`; default working directory |
 
-### Foreign key configuration via YAML
+The main command logs table, column and foreign-key counts, rendering version/layout and duration. Invalid options return exit code 2; generation/rendering errors return 1; complete requested output returns 0.
 
-Sometimes migrations omit foreign keys entirely. Supply a YAML file via `--fk-config` to stitch tables together explicitly:
+## Table and relationship behavior
+
+- Each table is a D2 `sql_table`; fully qualified names are quoted as one key.
+- Primary and foreign-key columns receive PK/FK markers, including both on the same column.
+- Single-column, unconditional unique constraints/indexes receive UNQ markers. Composite, partial and expression indexes remain in the notes without incorrectly marking individual columns unique.
+- Foreign-key arrows point from referencing columns to referenced columns. Explicit composite keys create one connector per column pair, labeled with a common constraint and pair number.
+- Repeated FK declarations are deduplicated. Columns retain their Schema order; table, relationship and note ordering is deterministic.
+- Primary keys, complete foreign keys and indexes (including available names, methods and predicates) appear in table tooltips. `--force-appendix` makes the notes visible without hovering.
+- Self references have explicit `source_column → target_column` labels: D2 0.7.1/ELK may route self loops to table boundaries rather than exact row ports. The project renderer sets `--elk-nodeSelfLoop=100` to leave room for these labels.
+
+This replaces draw.io's fixed note blocks beneath each table with tooltips/appendices. D2 handles text quoting, including reserved keywords, dots, quotes, backslashes, Unicode and literal `${...}` sequences.
+
+See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lang.com/tour/elk/) for the upstream rendering model.
+
+## Relationships without database FK constraints
+
+Three sources are supported:
+
+1. Native inline or table-level `FOREIGN KEY` definitions.
+2. Column comments such as `-- FK public.users(id)`.
+3. Additional YAML relationships supplied through `--fk-config`.
 
 ```yaml
 users:
   fks:
     - [role_id, roles, id]
     - [manager_id, users, id]
+
+order_items:
+  fks:
+    - [order_id, purchase_orders, id]
+    - [product_id, products, id]
 ```
 
-Each entry is `[local_column, target_table, target_column]`. Multi-column relationships can be expressed with nested lists (e.g. `[[tenant_id, user_id], memberships, [tenant_id, id]]`). The loader logs to the same parse log output when the YAML file cannot be parsed.
+Each triple is `[local_column, target_table, target_column]`. Composite relationships use `[[tenant_id, user_id], memberships, [tenant_id, id]]`. The historical two-item YAML shorthand `[id, target_table]` means the same column name on both sides.
 
-The YAML is handled by the dedicated `erd_generator.fk_config` module, keeping CLI wiring slim and making it easy to unit-test override scenarios.
+In the D2 path, a short table name must resolve unambiguously. Wrong qualified names, unknown columns and malformed entries fail generation; use explicit qualified names when schemas share table names. YAML adds relationships and does not replace conflicting SQL declarations.
 
-Example assets for quick testing are included:
-- `db/migration/V6__roles_and_managers.sql` adds `role_id` and `manager_id` columns without database constraints.
-- `sample_fk_config.yaml` links those columns (and a couple of earlier tables) so you can run `python3 gen_drawio_erd_table.py ... --fk-config sample_fk_config.yaml` and confirm the overrides appear in the diagram.
+SQL `REFERENCES table` without column names is supported when the target has a single primary-key column. Omitted composite references fail clearly because the existing Schema stores primary keys as an unordered set; it cannot safely infer the declaration order. Explicit composite reference columns are supported.
 
-The generated `schema.drawio` can be opened with [diagrams.net](https://app.diagrams.net/) or draw.io desktop.
+## Migration loading and errors
 
-## Repository Structure
-- `gen_drawio_erd_table.py`: thin CLI shim that delegates to the library modules.
-- `erd_generator/sql_parser.py`: extracts table/column/constraint metadata from PostgreSQL-style migrations.
-- `erd_generator/schema.py`: shared data classes plus helpers for mutating schema state.
-- `erd_generator/layout.py`: computes graph-aware table placement and note positioning.
-- `erd_generator/drawio.py`: renders the collected schema into draw.io XML elements.
-- `erd_generator/drawio_parser.py`: walks existing draw.io XML and resolves table/column nodes plus edges.
-- `erd_generator/fk_config.py`: loads foreign-key relationship overrides from YAML files.
-- `parse_drawio_edges.py`: CLI wrapper that emits FK-config-style YAML plus anomaly logs.
-- `db/migration/`: sample migrations covering the supported DDL patterns.
+Versioned files named `V<number>__description.sql` are ordered numerically, including dot/underscore version components; `V2` precedes `V10`. Non-versioned filenames follow versioned files in path order. This is a file ordering contract, not a complete Flyway migration-history implementation. Keep version names unique and include the complete migration history.
 
-## Extract relationships from existing draw.io files
-When you already have a `.drawio` document and only want the table/column connection list, run:
+The loader reads UTF-8 strictly. The D2 workflow stops on detected SQL/configuration failures or invalid relationships before overwriting source output. Diagnostics include file/object context and omit SQL/YAML payloads from generator console/file logs.
+
+Rendering explicitly requests ELK and ignores ambient `D2_*`/`ELK_*` environment configuration. It has no fallback to another backend or layout. SVG is rendered to a temporary file and verified before replacing the target. If rendering fails, the generated `.d2` is retained, the previous SVG is unchanged, and the command reports that the SVG was not updated. Source and SVG replacement are separate operations; automation must check the exit code.
+
+No SQL or diagram is uploaded to an online service by these commands.
+
+## Complex scenarios for demonstrations
 
 ```bash
-python3 parse_drawio_edges.py path/to/schema.drawio > sample_fk_config.yaml
+make demo
+make demo DEMO=release_evolution
 ```
 
-The parser:
-- picks table cells via `vertex="1"` + `shape=table;` styles and uses their `value` as the table name.
-- looks through descendant row/column cells to recover column names (skipping helper labels such as `PK`/`FK`, and falling back to empty strings when none can be resolved).
-- ignores annotation/text nodes (style starting with `text;`) so notes like unique index descriptions do not pollute the output.
-- walks every connector (`edge="1"`) so even visually-connected-but-unmapped edges show up in the log; missing pieces are rendered as placeholders such as `__MISSING_START_TABLE_12__` so you can fill them in later.
-- emits FK-config-style YAML compatible with `erd_generator.fk_config`, grouping foreign keys by source table (every edge is included, even when placeholders are needed).
-- prints warnings/informational logs for missing tables/columns and writes a companion text report (`<diagram>.edge_anomalies.log`, override with `--failure-log`) enumerating the problematic edges for manual cleanup.
+Open `generated/demos/index.html` for four fictional business diagrams and six expected-failure demonstrations, with D2 sources, exact commands, logs and a JSON report. The scenarios exercise multi-tenant composite relationships, schema evolution, cross-system YAML/comment relationships, and Unicode/long labels with an appendix. `DEMO` also accepts `tenant_orders`, `logical_relationships` and `readability`; the default `all` includes the failure demonstrations.
 
-## Compare draw.io diagrams with migrations
-Need to verify that the diagram stays in sync with the migrations? Run the comparator CLI:
+The automated checks validate structure, rendering and artifact preservation. Browser inspection found overlapping labels in the dense composite self-reference case; the gallery explicitly marks this layout limitation. See the [scenario guide and presentation walkthrough](examples/README.md) for commands, expected outcomes and visual limits. Each example directory is an independent input; do not pass the whole `examples/` tree as one migration history.
+
+## draw.io compatibility and rollback
+
+The existing command retains draw.io as its default:
 
 ```bash
-python3 compare_drawio_to_migrations.py ./db/migration ./schema.drawio --out schema_diff.txt
+.venv/bin/python gen_drawio_erd_table.py \
+  --migrations ./db/migration \
+  --out ./generated/schema.drawio \
+  --show-types --layout grid \
+  --fk-config sample_fk_config.yaml
 ```
 
-Add `--debug` to print the parsed table lists (from migrations and the diagram) plus any SQL parse failures to stderr when you need to troubleshoot mismatches:
+The new command can also select it explicitly:
 
 ```bash
-python3 compare_drawio_to_migrations.py ./db/migration ./schema.drawio --out schema_diff.txt --debug
+.venv/bin/python -m erd_generator --format drawio \
+  --migrations ./db/migration --out ./generated/schema.drawio
 ```
 
-The generated text report highlights:
-- tables that exist only in migrations or only in the diagram
-- missing/extra columns per shared table
-- foreign keys present in one source but not the other (based on the FK note block under each table)
-- index differences derived from the same note block
+`--per-row`, `--graphviz-prog`, `--graphviz-scale` and `--graphviz-spacing` apply only to draw.io. Graphviz requires a system `dot` binary and a working NetworkX Graphviz adapter. Its historical fallback to grid is retained; it does not apply to D2.
 
-## Supported SQL Snippets
-The parser targets a practical subset of PostgreSQL DDL with predictable formatting. Currently handled constructs include:
-- `CREATE TABLE` with inline / table-level `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` definitions.
-- Foreign-key hints embedded in column comments using `-- FK <target_table>(<target_column>)`.
-- `ALTER TABLE` for `ADD/DROP COLUMN`, `ALTER COLUMN` type/nullability, `ADD/DROP/RENAME` constraints, and table/column renames.
-- `CREATE [UNIQUE] INDEX` (supporting `USING` methods, simple expressions like `lower(email)`, and `WHERE` filters), plus `DROP INDEX` and `ALTER INDEX ... RENAME`.
-- `DROP TABLE [IF EXISTS]` with cascading cleanup of referencing foreign keys/index metadata.
+Existing tools remain usable:
 
-Unsupported-but-common features (handled as no-ops) include `SET/DROP DEFAULT`, `CHECK` constraints, partition syntax, and rewriting expression definitions during renames.
+```bash
+.venv/bin/python parse_drawio_edges.py generated/schema.drawio > recovered_fks.yaml
+.venv/bin/python compare_drawio_to_migrations.py db/migration generated/schema.drawio --out schema_diff.txt
+```
 
-## Known Limitations
-- Only a small SQL subset is supported (PostgreSQL DDL). Exotic syntax, quoted identifiers with spaces, and database-specific extensions may require manual adjustments.
-- Multi-column foreign keys draw one connector per column pair when both sides are provided; if the SQL omits or mismatches reference columns we fall back to a single edge.
-- Advanced ALTER patterns (e.g. ALTER COLUMN SET DEFAULT, CHECK constraints, expression indexes, function-based index column rewrites) are ignored; apply them manually if needed.
-- Views, enums, and other object types are ignored.
+The extractor reports unmapped endpoints and writes a companion anomaly log. The comparator reports differences in tables, columns, FK notes and index notes; `--debug` prints additional parsed metadata. It compares native migrations without YAML additions, so YAML-only relationships are expected differences. It is a legacy report command, not a D2 validator or a nonzero-exit CI difference gate.
 
-## Development Notes
-- Run `python3 gen_drawio_erd_table.py --help` to see the latest CLI options.
-- Contributions: add migration fixtures under `db/migration` and regenerate `schema.drawio` to verify changes visually.
+Rollback of the default workflow consists of explicitly invoking the old command and using its `.drawio` output. Existing `erd_generator.main()`, `build_parser()` and `build_drawio()` retain their default backend/API behavior. Parser correctness fixes apply to both backends. No database migration or deployment rollback is needed.
+
+## Repository structure
+
+```text
+erd_generator/
+  __main__.py          # primary python -m entrypoint (D2 default)
+  cli.py               # common argument validation and orchestration
+  schema.py            # output-independent schema contract
+  sql_parser.py        # SQL adapters and per-run loading result
+  diagnostics.py       # shared diagnostics (ParseFailure remains re-exported)
+  fk_config.py         # YAML relationship loading/resolution
+  validation.py        # FK integrity checks and normalized relationships
+  d2.py                # pure deterministic D2 source generation
+  d2_renderer.py       # pinned D2/ELK execution and SVG publication
+  drawio.py            # retained draw.io exporter
+  layout.py            # draw.io-only grid/Graphviz placement
+  drawio_parser.py     # retained XML reader
+  schema_diff.py       # retained draw.io comparison
+  test_*.py            # unit tests close to implementation
+tests/
+  test_cli.py          # subprocess CLI and import-boundary tests
+  test_legacy_tools.py # extraction/comparison compatibility
+  integration/        # real pinned D2 rendering; missing D2 is a failure
+  fixtures/           # explicit small SQL/D2 expectations
+scripts/              # synthetic rendering benchmark and CLI demo/gallery runner
+examples/             # fictional business inputs, expected failures and scenario catalog
+db/migration/         # sample SQL migrations
+sample_fk_config.yaml # sample additional relationships
+generated/            # ignored generated source, SVG and benchmark output
+.github/workflows/    # build/test/lint and real ELK checks
+docs/                 # migration design and local validation record
+```
+
+The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True)` and never mutates its input.
+
+## Development and validation
+
+```bash
+make build && make test
+make lint
+make test-integration
+make run
+make demo
+make benchmark
+```
+
+`make test` runs fast tests without requiring D2. `make test-integration` requires exactly D2 0.7.1 and bundled ELK; missing dependencies fail rather than skip rendering validation. `make format` formats new/rewritten modules while preserving formatting of untouched legacy files. Override `PYTHON=python` when using an already activated environment.
+
+`make benchmark` separately renders deterministic 50- and 200-table synthetic inputs. Each case writes source, SVG and `metrics.json` under `generated/benchmark-N/`, including duration, peak child-process RSS, output bytes and dimensions. These measurements do not predict every production graph's readability or runtime.
+
+CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command. [Migration design](docs/plans/d2-elk-migration.md) describes boundaries and rollback stages; [local validation](docs/validation/d2-elk.md) records measured results and remaining limits.
+
+## Supported SQL and limitations
+
+The parser supports a practical PostgreSQL DDL subset: CREATE TABLE, common ALTER column/constraint/rename operations, DROP TABLE/COLUMN/CONSTRAINT/INDEX, CREATE INDEX (including expression/partial metadata) and ALTER INDEX RENAME. The pinned sqlglot DROP representation is handled explicitly, so removed objects no longer remain in the diagram.
+
+The sample plus YAML has **5 tables, 21 columns, 5 FKs and 7 unique/index records** after all migrations. Both the original inline email UNIQUE and the later explicitly named email UNIQUE remain represented.
+
+CHECK/default changes, partitioning, views, enums, stored procedures, search_path resolution and all exotic DDL are not fully modeled. Some are ignored by the existing parser and some yield diagnostics; zero diagnostics do not prove complete PostgreSQL interpretation. Quoted identifier normalization and index-expression rewrites retain existing parser limitations.
+
+ELK uses hierarchical layout. Dense/large diagrams may contain crossings, extra bends or become wide; there is no automatic business-domain splitting or fixed-coordinate placement. SVG is intended for browser viewing. PNG/PDF and their browser dependencies are outside the first release.

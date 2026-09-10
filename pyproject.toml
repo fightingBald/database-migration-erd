@@ -1,0 +1,15 @@
+[tool.pytest.ini_options]
+testpaths = ["erd_generator", "tests"]
+markers = ["integration: requires the pinned D2 executable"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = [".venv", "generated"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+# Keep formatting of untouched legacy modules out of the migration diff.
+[tool.ruff.format]
+exclude = ["erd_generator/sql_parser.py", "erd_generator/schema.py", "erd_generator/drawio.py", "erd_generator/layout.py", "erd_generator/drawio_parser.py", "erd_generator/schema_diff.py", "parse_drawio_edges.py", "compare_drawio_to_migrations.py", "gen_drawio_erd_table.py"]
