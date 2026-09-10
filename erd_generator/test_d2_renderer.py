@@ -39,11 +39,12 @@ def fake_d2(
     return calls
 
 
-def test_success_uses_elk_argument_array_and_atomic_output(monkeypatch, paths):
+@pytest.mark.parametrize("version", ["0.7.1", "v0.7.1"])
+def test_success_uses_elk_argument_array_and_atomic_output(monkeypatch, paths, version):
     source, output = paths
     monkeypatch.setenv("D2_LAYOUT", "dagre")
     monkeypatch.setenv("D2_WATCH", "true")
-    calls = fake_d2(monkeypatch)
+    calls = fake_d2(monkeypatch, version=version)
     render_d2(source, output, D2RenderConfig(force_appendix=True))
     argv, kwargs = calls[-1]
     assert argv[argv.index("--layout") + 1] == "elk"
@@ -95,7 +96,14 @@ def test_missing_executable_has_actionable_error(monkeypatch, paths):
 
 @pytest.mark.parametrize(
     "version,elk,message",
-    [("0.6.0", "elk (bundled):", "version"), ("0.7.1", "dagre", "ELK")],
+    [
+        ("0.6.0", "elk (bundled):", "version"),
+        ("v0.6.0", "elk (bundled):", "version"),
+        ("v0.7.10", "elk (bundled):", "version"),
+        ("v0.7.1-dev", "elk (bundled):", "version"),
+        ("vv0.7.1", "elk (bundled):", "version"),
+        ("0.7.1", "dagre", "ELK"),
+    ],
 )
 def test_preflight_rejects_incompatible_engine(
     monkeypatch, paths, version, elk, message

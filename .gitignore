@@ -8,3 +8,5 @@ build/
 parse_log/
 *.edge_anomalies.log
 .DS_Store
+/TECH_SHARING_PPT.md
+/video.mp4

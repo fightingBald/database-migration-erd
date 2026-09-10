@@ -11,7 +11,7 @@ The draw.io exporter, relationship extractor, comparator and existing Python API
 
 ## Quick start
 
-Use Python **3.11+** and **D2 0.7.1**. Local validation used Python 3.14; CI is configured for 3.11 and 3.14. Rendering checks the exact D2 version to keep layout behavior reproducible.
+Use Python **3.11+** and **D2 0.7.1**. Local validation used Python 3.14; CI is configured for 3.11 and 3.14. Rendering checks the exact D2 version to keep layout behavior reproducible; both `0.7.1` and `v0.7.1` version strings are accepted.
 
 ```bash
 python3 -m venv .venv
@@ -120,17 +120,6 @@ Rendering explicitly requests ELK and ignores ambient `D2_*`/`ELK_*` environment
 
 No SQL or diagram is uploaded to an online service by these commands.
 
-## Complex scenarios for demonstrations
-
-```bash
-make demo
-make demo DEMO=release_evolution
-```
-
-Open `generated/demos/index.html` for four fictional business diagrams and six expected-failure demonstrations, with D2 sources, exact commands, logs and a JSON report. The scenarios exercise multi-tenant composite relationships, schema evolution, cross-system YAML/comment relationships, and Unicode/long labels with an appendix. `DEMO` also accepts `tenant_orders`, `logical_relationships` and `readability`; the default `all` includes the failure demonstrations.
-
-The automated checks validate structure, rendering and artifact preservation. Browser inspection found overlapping labels in the dense composite self-reference case; the gallery explicitly marks this layout limitation. See the [scenario guide and presentation walkthrough](examples/README.md) for commands, expected outcomes and visual limits. Each example directory is an independent input; do not pass the whole `examples/` tree as one migration history.
-
 ## draw.io compatibility and rollback
 
 The existing command retains draw.io as its default:
@@ -186,8 +175,7 @@ tests/
   test_legacy_tools.py # extraction/comparison compatibility
   integration/        # real pinned D2 rendering; missing D2 is a failure
   fixtures/           # explicit small SQL/D2 expectations
-scripts/              # synthetic rendering benchmark and CLI demo/gallery runner
-examples/             # fictional business inputs, expected failures and scenario catalog
+scripts/              # reproducible synthetic rendering benchmark
 db/migration/         # sample SQL migrations
 sample_fk_config.yaml # sample additional relationships
 generated/            # ignored generated source, SVG and benchmark output
@@ -204,7 +192,6 @@ make build && make test
 make lint
 make test-integration
 make run
-make demo
 make benchmark
 ```
 

@@ -21,7 +21,7 @@ def require_pinned_d2():
     result = subprocess.run(
         ["d2", "--version"], capture_output=True, text=True, check=True, timeout=10
     )
-    assert result.stdout.strip() == D2_VERSION, (
+    assert result.stdout.strip().removeprefix("v") == D2_VERSION, (
         "Install the pinned D2; rendering tests must not be silently skipped"
     )
 

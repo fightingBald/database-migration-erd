@@ -78,7 +78,7 @@ def render_d2(
         raise D2RenderError(f"D2 source does not exist: {source}")
     started = time.monotonic()
     version = _run([config.executable, "--version"], config, "version check")
-    if version != D2_VERSION:
+    if version.removeprefix("v") != D2_VERSION:
         raise D2RenderError(
             f"D2 version mismatch: expected {D2_VERSION}, got {version[:80]!r}"
         )
