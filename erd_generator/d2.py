@@ -1,5 +1,6 @@
 """Deterministic D2 SQL-table source generation. No I/O or layout dependencies."""
 
+from .d2_styles import CLEAN_CONFIG, CLEAN_CONNECTION, CLEAN_TABLE, STYLES
 from .schema import Schema, Table
 from .validation import Relationship, primary_columns, validate_schema
 
@@ -73,10 +74,16 @@ def _notes(table: Table, relations: tuple[Relationship, ...]) -> str:
 
 
 def build_d2(
-    schema: Schema, *, show_types: bool = False, direction: str = "right"
+    schema: Schema,
+    *,
+    show_types: bool = False,
+    direction: str = "right",
+    style: str = "clean",
 ) -> str:
     if direction not in {"up", "down", "left", "right"}:
         raise ValueError("D2 direction must be up, down, left or right")
+    if style not in STYLES:
+        raise ValueError("D2 style must be clean or classic")
     result = validate_schema(schema)
     if result.errors:
         raise ValueError("Schema validation failed: " + "; ".join(result.errors))
@@ -85,6 +92,7 @@ def build_d2(
         "vars: {",
         "  d2-config: {",
         "    layout-engine: elk",
+        *(CLEAN_CONFIG if style == "clean" else ()),
         "  }",
         "}",
         f"direction: {direction}",
@@ -95,6 +103,8 @@ def build_d2(
         foreign_columns.setdefault(fk.table, set()).update(fk.columns)
     for name, table in sorted(schema.items()):
         lines.extend([f"{quote_d2(name)}: {{", "  shape: sql_table"])
+        if style == "clean":
+            lines.extend(CLEAN_TABLE)
         primary = primary_columns(table)
         foreign = foreign_columns.get(name, set())
         unique = _unique_columns(table)
@@ -138,5 +148,14 @@ def build_d2(
                 ) + f"{local} → {remote}"
             if edge_label:
                 connection += f": {quote_d2(edge_label)}"
-            lines.append(connection)
+            if style == "clean":
+                lines.extend(
+                    [
+                        connection + (" {" if edge_label else ": {"),
+                        *CLEAN_CONNECTION,
+                        "}",
+                    ]
+                )
+            else:
+                lines.append(connection)
     return "\n".join(lines).rstrip() + "\n"

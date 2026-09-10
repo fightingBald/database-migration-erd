@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .d2_renderer import D2RenderConfig, D2RenderError, render_d2
+from .d2_styles import STYLES
 from .diagnostics import ParseFailure
 from .fk_config import apply_foreign_key_config, load_foreign_key_config
 from .sql_parser import load_schema_result
@@ -50,6 +51,11 @@ def build_parser(*, default_format: str = "drawio") -> argparse.ArgumentParser:
         help="D2: elk; draw.io: grid (default) or graphviz",
     )
     d2 = parser.add_argument_group("D2 options")
+    d2.add_argument(
+        "--style",
+        choices=STYLES,
+        help="D2 visual style: clean (default) or classic",
+    )
     d2.add_argument(
         "--direction",
         choices=["right", "left", "up", "down"],
@@ -121,14 +127,15 @@ def _validate_options(args: argparse.Namespace) -> None:
         if args.layout not in (None, "grid", "graphviz"):
             raise ValueError("draw.io supports only grid or graphviz layouts")
         if (
-            args.direction
+            args.style is not None
+            or args.direction
             or args.render
             or args.d2_binary is not None
             or args.render_timeout is not None
             or args.force_appendix
         ):
             raise ValueError(
-                "D2 direction/rendering options are not applicable to draw.io"
+                "D2 style/direction/rendering options are not applicable to draw.io"
             )
         for name in ("graphviz_scale", "graphviz_spacing"):
             value = getattr(args, name)
@@ -215,7 +222,10 @@ def run_cli(args: argparse.Namespace) -> int:
             from .d2 import build_d2
 
             source = build_d2(
-                schema, show_types=args.show_types, direction=args.direction or "right"
+                schema,
+                show_types=args.show_types,
+                direction=args.direction or "right",
+                style=args.style or "clean",
             )
             _write_source(output, source)
             source_written = True

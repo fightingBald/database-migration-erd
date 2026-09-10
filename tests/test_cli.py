@@ -47,6 +47,27 @@ def test_default_entrypoint_generates_d2_without_starting_renderer(tmp_path):
     assert not (tmp_path / "schema.svg").exists()
 
 
+def test_clean_style_is_default_and_classic_can_be_selected(tmp_path):
+    args = sample_args(tmp_path)
+    result = cli(*args)
+    assert result.returncode == 0, result.stderr
+    source = tmp_path / "schema.d2"
+    assert "theme-overrides:" in source.read_text()
+    result = cli(*args, "--style", "classic")
+    assert result.returncode == 0, result.stderr
+    assert "theme-overrides:" not in source.read_text()
+    assert source.read_text().count("shape: sql_table") == 5
+
+
+@pytest.mark.parametrize("style", ["clean", "classic"])
+def test_d2_style_is_rejected_for_drawio(tmp_path, style):
+    result = cli(
+        *sample_args(tmp_path, "drawio"), "--format", "drawio", "--style", style
+    )
+    assert result.returncode == 2
+    assert not (tmp_path / "schema.drawio").exists()
+
+
 def test_d2_path_does_not_import_drawio_dependencies(tmp_path):
     program = """
 import importlib.abc, runpy, sys
@@ -77,6 +98,7 @@ runpy.run_module('erd_generator', run_name='__main__')
         ["--render-timeout", "0", "--render", "svg"],
         ["--force-appendix"],
         ["--render", "png"],
+        ["--style", "unknown"],
     ],
 )
 def test_invalid_d2_options_fail_before_writing(tmp_path, options):

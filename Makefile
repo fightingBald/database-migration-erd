@@ -2,7 +2,8 @@ PYTHON ?= .venv/bin/python
 MIGRATIONS ?= db/migration
 SOURCE ?= generated/schema.d2
 FK_CONFIG ?= sample_fk_config.yaml
-DIAGRAM_ARGS = --migrations "$(MIGRATIONS)" --out "$(SOURCE)" --show-types $(if $(FK_CONFIG),--fk-config "$(FK_CONFIG)",)
+STYLE ?= clean
+DIAGRAM_ARGS = --migrations "$(MIGRATIONS)" --out "$(SOURCE)" --show-types --style "$(STYLE)" $(if $(FK_CONFIG),--fk-config "$(FK_CONFIG)",)
 
 .PHONY: build gen run test test-integration lint format benchmark
 build:

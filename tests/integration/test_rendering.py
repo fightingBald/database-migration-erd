@@ -26,11 +26,13 @@ def require_pinned_d2():
     )
 
 
-def test_golden_source_matches_and_compiles(tmp_path):
+@pytest.mark.parametrize("style", ["classic", "clean"])
+def test_golden_source_matches_and_compiles(tmp_path, style):
     schema = {}
     parse_schema_from_sql((ROOT / "tests/fixtures/simple.sql").read_text(), schema)
-    source = build_d2(schema, show_types=True)
-    assert source == (ROOT / "tests/fixtures/simple.d2").read_text()
+    source = build_d2(schema, show_types=True, style=style)
+    if style == "classic":
+        assert source == (ROOT / "tests/fixtures/simple.d2").read_text()
     path = tmp_path / "simple.d2"
     path.write_text(source, encoding="utf-8")
     subprocess.run(
@@ -44,6 +46,22 @@ def test_golden_source_matches_and_compiles(tmp_path):
     root = ET.parse(tmp_path / "simple.svg").getroot()
     assert "public.users" in ["".join(e.itertext()) for e in root.iter(NS + "text")]
     assert any("manager_id" in (e.text or "") for e in root.iter(NS + "title"))
+    if style == "clean":
+        # Check native SVG colors so a renderer silently ignoring the source
+        # palette cannot pass just because the D2 text contains style settings.
+        headers = [
+            e for e in root.iter(NS + "rect") if "class_header" in e.get("class", "")
+        ]
+        assert headers and all(e.get("fill") == "#DFE9F5" for e in headers)
+        texts = {"".join(e.itertext()): e for e in root.iter(NS + "text")}
+        assert texts["id"].get("fill") == "#334155"
+        assert texts["PK"].get("fill") == "#0F766E"
+        connections = [
+            e
+            for e in root.iter(NS + "path")
+            if "connection" in e.get("class", "").split()
+        ]
+        assert connections and all(e.get("stroke") == "#64748B" for e in connections)
 
 
 def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path):
@@ -83,7 +101,8 @@ def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path):
     assert not {"last_login", "order_label"}.intersection(texts)
 
 
-def test_literals_and_reserved_keys_survive_real_compilation(tmp_path):
+@pytest.mark.parametrize("style", ["classic", "clean"])
+def test_literals_and_reserved_keys_survive_real_compilation(tmp_path, style):
     table_name = 'public.${literal}."quoted"\\路径'
     names = [
         "shape",
@@ -104,7 +123,7 @@ def test_literals_and_reserved_keys_survive_real_compilation(tmp_path):
         foreign_keys=[ForeignKey(("a.b",), table_name, ("shape",))],
     )
     source = tmp_path / "literal.d2"
-    source.write_text(build_d2({table_name: table}), encoding="utf-8")
+    source.write_text(build_d2({table_name: table}, style=style), encoding="utf-8")
     render_d2(source, tmp_path / "literal.svg", D2RenderConfig(force_appendix=True))
     root = ET.parse(tmp_path / "literal.svg").getroot()
     texts = ["".join(e.itertext()) for e in root.iter(NS + "text")]

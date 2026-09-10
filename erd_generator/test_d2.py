@@ -103,6 +103,35 @@ def test_repeated_foreign_keys_are_deduplicated_and_input_is_not_mutated():
     assert source == build_d2(dict(reversed(list(schema.items()))))
 
 
+def test_clean_and_classic_keep_column_definitions_and_relationship_endpoints():
+    schema = sample_schema()
+    before = deepcopy(schema)
+    clean = build_d2(schema, show_types=True)
+    classic = build_d2(schema, show_types=True, style="classic")
+    assert "theme-overrides:" in clean
+    assert "theme-overrides:" not in classic
+
+    def columns(text):
+        return [line for line in text.splitlines() if line.startswith('  "')]
+
+    def edges(text):
+        return [
+            line.removesuffix(" {")
+            for line in text.splitlines()
+            if line.startswith('"') and " -> " in line
+        ]
+
+    assert columns(clean) == columns(classic)
+    assert edges(clean) == edges(classic)
+    assert schema == before
+
+
+@pytest.mark.parametrize("style", ["unknown", "clean\na -> b"])
+def test_rejects_invalid_style(style):
+    with pytest.raises(ValueError, match="style"):
+        build_d2(sample_schema(), style=style)
+
+
 def test_notes_and_relations_are_independent_of_metadata_insertion_order():
     schema = sample_schema()
     table = schema["public.child"]

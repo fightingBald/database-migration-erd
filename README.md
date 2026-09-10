@@ -51,6 +51,7 @@ Make accepts equivalent overrides:
 ```bash
 make run MIGRATIONS=/path/to/migrations SOURCE=generated/project.d2 FK_CONFIG=/path/to/fks.yaml
 make gen MIGRATIONS=/path/to/migrations FK_CONFIG=
+make run STYLE=classic
 ```
 
 | Option | Behavior |
@@ -58,6 +59,7 @@ make gen MIGRATIONS=/path/to/migrations FK_CONFIG=
 | `--migrations PATH` | Required migration directory; scans SQL recursively |
 | `--out PATH` | Required `.d2` source output; `.drawio`/`.xml` for the legacy backend |
 | `--format d2\|drawio` | Module entrypoint defaults to `d2` |
+| `--style clean\|classic` | D2 visual preset, default `clean`; `classic` restores the original appearance |
 | `--show-types` | Display SQL column types; otherwise retain names and constraints |
 | `--fk-config PATH` | Add relationships declared in YAML |
 | `--layout elk` | D2 always uses ELK; draw.io accepts `grid` or `graphviz` |
@@ -72,6 +74,7 @@ The main command logs table, column and foreign-key counts, rendering version/la
 
 ## Table and relationship behavior
 
+- The default `clean` style uses blue-grey headers, white table bodies, light separators, dark field names, muted types, teal constraint markers and rounded slate-coloured connections. Connection labels use regular text. The palette and styles are embedded in the D2 source.
 - Each table is a D2 `sql_table`; fully qualified names are quoted as one key.
 - Primary and foreign-key columns receive PK/FK markers, including both on the same column.
 - Single-column, unconditional unique constraints/indexes receive UNQ markers. Composite, partial and expression indexes remain in the notes without incorrectly marking individual columns unique.
@@ -83,6 +86,8 @@ The main command logs table, column and foreign-key counts, rendering version/la
 This replaces draw.io's fixed note blocks beneath each table with tooltips/appendices. D2 handles text quoting, including reserved keywords, dots, quotes, backslashes, Unicode and literal `${...}` sequences.
 
 See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lang.com/tour/elk/) for the upstream rendering model.
+
+Use `--style classic` (or `make run STYLE=classic`) to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. `--style` applies only to D2. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
 
 ## Relationships without database FK constraints
 
@@ -164,6 +169,7 @@ erd_generator/
   fk_config.py         # YAML relationship loading/resolution
   validation.py        # FK integrity checks and normalized relationships
   d2.py                # pure deterministic D2 source generation
+  d2_styles.py         # native D2 palette, table and connection presets
   d2_renderer.py       # pinned D2/ELK execution and SVG publication
   drawio.py            # retained draw.io exporter
   layout.py            # draw.io-only grid/Graphviz placement
@@ -183,7 +189,7 @@ generated/            # ignored generated source, SVG and benchmark output
 docs/                 # migration design and local validation record
 ```
 
-The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True)` and never mutates its input.
+The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True, style="clean")` and never mutates its input; `style="classic"` preserves the original D2 output style.
 
 ## Development and validation
 
