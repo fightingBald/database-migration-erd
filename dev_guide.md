@@ -21,7 +21,7 @@ Both paths are required. `SQL_DIR` is the migration directory. The output extens
 | `./generated/schema.svg` | `schema.svg` and `schema.d2` in `./generated/` | Yes |
 | `./generated/schema.d2` | `schema.d2` only | No |
 
-The short command defaults to ELK, clean styling, rightward layout and visible column types. Additional FK YAML is loaded only when explicitly supplied. No example relationships or input/output paths are selected implicitly.
+The short command defaults to ELK, clean styling, compact component placement, rightward relationship flow and visible column types. Additional FK YAML is loaded only when explicitly supplied. No example relationships or input/output paths are selected implicitly.
 
 Optional overrides follow the two paths:
 
@@ -40,7 +40,7 @@ Quote paths containing spaces. Generated files are overwritten by regeneration; 
 | `--show-types` | Explicitly display SQL column types; already enabled for the short command |
 | `--fk-config PATH` | Add relationships declared in YAML |
 | `--layout elk` | D2 always uses ELK; normally omitted |
-| `--direction right\|left\|up\|down` | Global D2 direction, default `right` |
+| `--direction right\|left\|up\|down` | Relationship flow within each connected group, default `right`; independent groups still pack automatically |
 | `--d2-binary PATH` | Rendering executable, default `d2`; requires SVG output |
 | `--render-timeout SECONDS` | Positive timeout per D2 process, default 120; requires SVG output |
 | `--force-appendix` | Display tooltip contents in the SVG appendix; requires SVG output |
@@ -72,6 +72,20 @@ This replaces draw.io's fixed note blocks beneath each table with tooltips/appen
 See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lang.com/tour/elk/) for the upstream rendering model.
 
 Use `--style classic` to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. `--style` applies only to D2. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
+
+### Compact placement
+
+Disconnected tables and independent relationship groups are packed automatically. No extra command-line option is required:
+
+- Tables linked by any validated FK, including YAML relationships, form a connected group. Self references stay with their table. Each FK remains entirely inside one group.
+- Each group uses native ELK placement and field-level routing. A diagram with only one connected group retains its previous flat D2 structure.
+- For multiple groups, a pure planner estimates their sizes from names, column counts/types and relationship layers. It compares column counts, balancing the overall aspect ratio and unused area, and places taller groups first to balance column heights.
+- Invisible D2 containers separate the outer grid from each group's ELK layout. Tables retain their natural dimensions and font sizes; putting SQL tables directly into a grid would stretch rows/widths, and putting FK endpoints directly in separate grid cells would lose ELK routing. See [D2 grid behavior](https://d2lang.com/tour/grid-diagrams/).
+- The renderer uses 16-unit ELK container padding; grids use 48-unit gaps. Sorting and tie-breaking are deterministic. `.d2` generation still needs no D2 executable, and layout planning does not mutate Schema or depend on draw.io/NetworkX.
+
+Size estimates guide packing; they are not a guaranteed canvas ratio. A single large connected graph, exceptionally long labels or one very tall table can still make a wide/tall diagram. A connected graph is not split into separate cells just to meet an aspect ratio. `--direction` controls its relationship flow, and `--style classic` changes appearance while keeping automatic packing.
+
+Migration/rollback: generated D2 for disconnected graphs now nests objects under invisible `_erd_column_*` / `_erd_component_*` containers. Visible SQL names, columns, tooltips and FK meanings remain unchanged, but scripts referencing absolute D2 object paths must account for the new prefixes. Use the generator's SVG command for the configured spacing; invoking D2 manually without the padding flag uses D2's larger default container margins. Reverting the compact-layout change and regenerating restores the earlier flat layout; no SQL migration or database rollback is needed.
 
 ## Relationships without database FK constraints
 
@@ -218,6 +232,7 @@ erd_generator/
   fk_config.py         # YAML relationship loading/resolution
   validation.py        # FK integrity checks and normalized relationships
   d2.py                # pure deterministic D2 source generation
+  d2_layout.py         # connected components and estimated column packing
   d2_styles.py         # native D2 palette, table and connection presets
   d2_renderer.py       # pinned D2/ELK execution and SVG publication
   drawio.py            # retained draw.io exporter
@@ -238,7 +253,7 @@ generated/            # ignored generated source, SVG and benchmark output
 docs/                 # migration design and local validation record
 ```
 
-SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation.
+SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation` and `d2_layout` over the shared Schema; the planner performs no I/O, and the renderer depends only on shared presentation settings, not on the planner or Schema.
 
 The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True, style="clean")` and never mutates its input; `style="classic"` preserves the original D2 output style.
 
@@ -270,4 +285,4 @@ The sample plus YAML has **5 tables, 21 columns, 5 FKs and 7 unique/index record
 
 CHECK/default changes, partitioning, views, enums, routine execution, search_path resolution and all exotic DDL are not fully modeled. Routine definitions and supported setup statements are ignored as described above; unsupported procedural execution and schema mutations yield diagnostics. Some other constructs are still ignored by the existing parser, so zero diagnostics do not prove complete PostgreSQL interpretation. Quoted identifier normalization and index-expression rewrites retain existing parser limitations.
 
-ELK uses hierarchical layout. Dense/large diagrams may contain crossings, extra bends or become wide; there is no automatic business-domain splitting or fixed-coordinate placement. SVG is intended for browser viewing. PNG/PDF and their browser dependencies are outside the first release.
+ELK uses hierarchical layout within each connected group, and disconnected groups are packed as described above. Dense/large connected diagrams may contain crossings, extra bends or become wide; there is no automatic business-domain splitting or fixed-coordinate placement. SVG is intended for browser viewing. PNG/PDF and their browser dependencies are outside the first release.

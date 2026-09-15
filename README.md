@@ -7,7 +7,7 @@ Turn PostgreSQL migration SQL into ER diagrams with **D2 + ELK**. No database co
 - Show tables, columns, data types, keys and relationships.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
-- Automatically lay out diagrams and export D2 source or SVG images.
+- Pack independent tables and relationship groups into compact columns; export D2 or SVG.
 
 ## Install
 
@@ -37,12 +37,12 @@ To generate only D2 source, change the output extension. This does not require D
 python -m erd_generator ./db/migration ./generated/schema.d2
 ```
 
-The default uses clean styling, rightward layout and visible column types. Add options after the two paths when needed:
+The default uses clean styling, compact placement and visible column types. Add options after the two paths when needed:
 
 | Option | Purpose |
 | --- | --- |
 | `--fk-config file.yaml` | Add relationships; see the [sample YAML](sample_fk_config.yaml). |
-| `--direction down` | Lay out the diagram from top to bottom. |
+| `--direction down` | Lay out related tables from top to bottom. |
 | `--hide-types` | Hide column data types. |
 | `--style classic` | Use the original visual style. |
 

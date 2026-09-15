@@ -11,6 +11,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+from .d2_styles import COMPONENT_PADDING
+
 D2_VERSION = "0.7.1"
 LOGGER = logging.getLogger(__name__)
 
@@ -98,6 +100,8 @@ def render_d2(
                 "--layout",
                 "elk",
                 "--elk-nodeSelfLoop=100",
+                f"--elk-padding=[top={COMPONENT_PADDING},left={COMPONENT_PADDING},"
+                f"bottom={COMPONENT_PADDING},right={COMPONENT_PADDING}]",
                 "--watch=false",
                 "--theme=0",
                 "--dark-theme=-1",
