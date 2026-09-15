@@ -329,6 +329,28 @@ def test_postgres_setup_and_static_do_generate_without_credentials_in_logs(tmp_p
     assert not (tmp_path / "parse_log").exists()
 
 
+def test_library_role_migration_preserves_surrounding_ddl(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    setup = (ROOT / "tests/fixtures/postgres_role_setup.sql").read_text()
+    (migrations / "V1.sql").write_text(
+        "CREATE TABLE demo_library.accounts(id int PRIMARY KEY);\n"
+        + setup
+        + "\nCREATE TABLE demo_library.events(id int, account_id int REFERENCES demo_library.accounts(id));\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "schema.d2"
+    result = cli(migrations, output, "--log-dir", tmp_path)
+    assert result.returncode == 0, result.stderr
+    source = output.read_text()
+    assert source.count("shape: sql_table") == 2
+    assert (
+        '"demo_library.events"."account_id" -> "demo_library.accounts"."id"' in source
+    )
+    assert "demo_library_reader" not in source
+    assert not (tmp_path / "parse_log").exists()
+
+
 @pytest.mark.parametrize(
     "body,reason",
     [
@@ -340,8 +362,18 @@ def test_postgres_setup_and_static_do_generate_without_credentials_in_logs(tmp_p
             "DO $missing$ BEGIN RAISE NOTICE 'private_payload'; END;",
             "Unterminated SQL token",
         ),
+        (
+            "DO $$ BEGIN IF true THEN GRANT SELECT ON keep TO reader; "
+            "ELSE EXECUTE format('DROP TABLE %I', 'private_payload'); END IF; END $$;",
+            "Unsupported DO",
+        ),
+        (
+            "DO $$ BEGIN EXECUTE format('GRANT SELECT ON keep TO %I', "
+            "private_payload()); END $$;",
+            "Unsupported DO",
+        ),
     ],
-    ids=["dynamic-do", "unclosed-dollar-quote"],
+    ids=["dynamic-do", "unclosed-dollar-quote", "hidden-ddl", "argument-call"],
 )
 def test_unsupported_postgres_input_preserves_both_outputs(tmp_path, body, reason):
     migrations = tmp_path / "migrations"

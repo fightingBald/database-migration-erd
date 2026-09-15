@@ -6,7 +6,7 @@ Turn PostgreSQL migration SQL into ER diagrams with **D2 + ELK**. No database co
 
 - Show tables, columns, data types, keys and relationships.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
-- Read dollar-quoted SQL and simple `DO` blocks without conditions, loops or dynamic SQL.
+- Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
 - Automatically lay out diagrams and export D2 source or SVG images.
 
 ## Install
