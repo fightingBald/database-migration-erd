@@ -184,3 +184,33 @@ def test_rejects_invalid_direction(value):
 def test_rejects_xml_invalid_control_characters():
     with pytest.raises(ValueError, match="control"):
         quote_d2("a\x00b")
+
+
+def test_disconnected_layout_is_deterministic_and_preserves_schema():
+    schema = sample_schema()
+    schema.update(
+        {
+            name: Table(name, columns=[Column("id", "INT")])
+            for name in (
+                "_erd_column_0",
+                "_erd_component_0",
+                'public."quoted"',
+                "孤立表",
+            )
+        }
+    )
+    before = deepcopy(schema)
+    source = build_d2(schema, show_types=True)
+    assert "grid-columns:" in source
+    assert source == build_d2(dict(reversed(list(schema.items()))), show_types=True)
+    assert schema == before
+    assert source.count("shape: sql_table") == len(schema)
+    assert source.count(" -> ") == 3  # Two composite edges and the FK tooltip.
+    for name in schema:
+        assert f"{quote_d2(name)}: {{" in source
+
+
+def test_one_connected_component_keeps_native_elk_source():
+    source = build_d2(sample_schema())
+    assert "grid-columns:" not in source
+    assert '"public.child"."tenant" -> "public.parent"."tenant"' in source

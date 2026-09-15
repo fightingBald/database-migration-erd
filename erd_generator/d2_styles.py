@@ -1,6 +1,8 @@
 """Native D2 presentation settings; independent of schema parsing and rendering."""
 
 STYLES = ("clean", "classic")
+COMPONENT_PADDING = 16
+GRID_GAP = 48
 
 # sql_table body text and key markers come from theme slots, while its fill
 # controls both the header and row separators in the pinned D2 renderer.
