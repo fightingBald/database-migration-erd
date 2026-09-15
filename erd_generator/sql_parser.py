@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
@@ -12,6 +13,14 @@ from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
 
 from .diagnostics import ParseFailure
+from .postgres_commands import (
+    DO_STATEMENT_ERROR,
+    UnsupportedDoError,
+    extract_do_body,
+    harmless_do_statement,
+    neutral_command,
+    routine_definition,
+)
 from .schema import (
     Column,
     ForeignKey,
@@ -21,6 +30,12 @@ from .schema import (
     drop_column_in_schema,
     rename_column_in_schema,
     rename_table,
+)
+from .sql_statements import (
+    SQLLexError,
+    split_sql_statements as _split_sql_statements,
+    starts_with,
+    tokenize_sql,
 )
 
 RENAME_CONSTRAINT_RE = re.compile(
@@ -579,82 +594,62 @@ def _handle_command(command: exp.Command, schema: Schema) -> bool:
 # Public API
 
 
-def _split_sql_statements(sql: str) -> List[str]:
-    statements: List[str] = []
-    buf: List[str] = []
-    in_single = False
-    in_double = False
-    i = 0
-    length = len(sql)
-    while i < length:
-        ch = sql[i]
-        next_two = sql[i : i + 2]
-        if ch == "'" and not in_double:
-            if in_single and i + 1 < length and sql[i + 1] == "'":
-                buf.append("''")
-                i += 2
-                continue
-            in_single = not in_single
-            buf.append(ch)
-            i += 1
-            continue
-        if ch == '"' and not in_single:
-            if in_double and i + 1 < length and sql[i + 1] == '"':
-                buf.append('""')
-                i += 2
-                continue
-            in_double = not in_double
-            buf.append(ch)
-            i += 1
-            continue
-        if not in_single and not in_double and next_two == "--":
-            newline_index = sql.find("\n", i)
-            if newline_index == -1:
-                buf.append(sql[i:])
-                i = length
-                break
-            buf.append(sql[i:newline_index])
-            i = newline_index
-            continue
-        if not in_single and not in_double and next_two == "/*":
-            end_index = sql.find("*/", i + 2)
-            if end_index == -1:
-                buf.append(sql[i:])
-                i = length
-                break
-            end_index += 2
-            buf.append(sql[i:end_index])
-            i = end_index
-            continue
-        if ch == ";" and not in_single and not in_double:
-            statement = "".join(buf).strip()
-            if statement:
-                statements.append(statement)
-            buf = []
-            i += 1
-            continue
-        buf.append(ch)
-        i += 1
-    tail = "".join(buf).strip()
-    if tail:
-        statements.append(tail)
-    return statements
-
-
-def parse_schema_from_sql(
+def _parse_sql(
     sql: str,
     schema: Schema,
     *,
     source: Optional[str] = None,
     failures: Optional[List[ParseFailure]] = None,
+    line_offset: int = 0,
+    in_do: bool = False,
 ) -> None:
     if not sql.strip():
         return
+    try:
+        statements = _split_sql_statements(sql)
+    except SQLLexError as exc:
+        _record_failure(failures, source, "", str(exc), line=line_offset + exc.line)
+        return
     cursor = 0
-    for raw_statement in _split_sql_statements(sql):
+    for raw_statement in statements:
         offset = sql.find(raw_statement, cursor)
-        start_line = sql.count("\n", 0, offset) + 1
+        start_line = line_offset + sql.count("\n", 0, offset) + 1
         cursor = offset + len(raw_statement)
+        tokens = tokenize_sql(raw_statement)
+        if not tokens:
+            continue
+        neutral = neutral_command(tokens)
+        if neutral or in_do and harmless_do_statement(tokens):
+            logging.getLogger(__name__).debug(
+                "SQL skipped for ERD: %s at %s:%s", neutral or "DO no-op", source or "<input>", start_line
+            )
+            continue
+        if starts_with(tokens, "DO"):
+            if in_do:
+                _record_failure(failures, source, raw_statement, DO_STATEMENT_ERROR, line=start_line)
+                return
+            try:
+                body = extract_do_body(raw_statement, tokens)
+            except (UnsupportedDoError, SQLLexError) as exc:
+                _record_failure(failures, source, "", str(exc), line=start_line)
+                continue
+            staged = deepcopy(schema)
+            block_failures: List[ParseFailure] = []
+            _parse_sql(body.sql, staged, source=source, failures=block_failures,
+                       line_offset=start_line - 1 + body.line_offset, in_do=True)
+            if block_failures:
+                for failure in block_failures:
+                    _record_failure(failures, source, failure.sql, failure.reason, line=failure.line)
+            else:
+                schema.clear()
+                schema.update(staged)
+                logging.getLogger(__name__).debug(
+                    "Static DO block applied at %s:%s", source or "<input>", start_line
+                )
+            continue
+        if in_do and not any(starts_with(tokens, word) for word in ("CREATE", "ALTER", "DROP")):
+            _record_failure(failures, source, raw_statement, DO_STATEMENT_ERROR, line=start_line)
+            return
         try:
             expressions = sqlglot.parse(raw_statement, read="postgres")
         except (ParseError, TokenError) as exc:
@@ -667,26 +662,58 @@ def parse_schema_from_sql(
                 f"Parse error ({exc.__class__.__name__})",
                 line=start_line + error_line - 1,
             )
+            if in_do:
+                return
             continue
         for statement in expressions:
-            if isinstance(statement, exp.Create):
+            statement_failures: List[ParseFailure] = []
+            definition = routine_definition(statement)
+            if definition:
+                logging.getLogger(__name__).debug(
+                    "SQL skipped for ERD: %s at %s:%s", definition, source or "<input>", start_line
+                )
+            elif isinstance(statement, exp.Create):
                 _handle_create(
                     statement,
                     schema,
                     raw_statement,
                     source=source,
-                    failures=failures,
+                    failures=statement_failures,
                 )
             elif isinstance(statement, exp.Alter):
-                _handle_alter(statement, schema)
+                kind = (statement.args.get("kind") or "").upper()
+                if kind in {"TABLE", "INDEX"}:
+                    _handle_alter(statement, schema)
+                else:
+                    _record_failure(statement_failures, source, raw_statement, f"Unsupported ALTER {kind}")
             elif isinstance(statement, exp.Drop):
-                _handle_drop(statement, schema)
+                kind = (statement.args.get("kind") or "").upper()
+                if kind in {"TABLE", "INDEX"}:
+                    _handle_drop(statement, schema)
+                else:
+                    _record_failure(statement_failures, source, raw_statement, f"Unsupported DROP {kind}")
             elif isinstance(statement, exp.Command):
                 handled = _handle_command(statement, schema)
                 if not handled:
-                    _record_failure(failures, source, raw_statement, "Unsupported SQL command")
+                    _record_failure(statement_failures, source, raw_statement, "Unsupported SQL command")
+            elif in_do:
+                _record_failure(statement_failures, source, raw_statement, DO_STATEMENT_ERROR)
+            for failure in statement_failures:
+                _record_failure(failures, source, failure.sql, failure.reason, line=failure.line or start_line)
+            if in_do and statement_failures:
+                return
     for table in schema.values():
         table.sync_primary_key_flags()
+
+
+def parse_schema_from_sql(
+    sql: str,
+    schema: Schema,
+    *,
+    source: Optional[str] = None,
+    failures: Optional[List[ParseFailure]] = None,
+) -> None:
+    _parse_sql(sql, schema, source=source, failures=failures)
 
 
 @dataclass

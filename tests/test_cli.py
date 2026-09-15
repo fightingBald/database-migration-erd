@@ -311,6 +311,59 @@ def test_unknown_fk_config_prevents_partial_diagram(tmp_path):
     assert not (tmp_path / "schema.d2").exists()
 
 
+def test_postgres_setup_and_static_do_generate_without_credentials_in_logs(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1__setup.sql").write_text(
+        "CREATE SCHEMA app;\n"
+        "CREATE USER reader PASSWORD 'private;credential';\n"
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO reader;\n"
+        "DO $migration$ BEGIN CREATE TABLE app.items(id int PRIMARY KEY); END; $migration$;\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "schema.d2"
+    result = cli(migrations, output, "--log-dir", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert '"app.items"' in output.read_text()
+    assert "private;credential" not in result.stdout + result.stderr
+    assert not (tmp_path / "parse_log").exists()
+
+
+@pytest.mark.parametrize(
+    "body,reason",
+    [
+        (
+            "DO $$ BEGIN CREATE TABLE staged(id int); EXECUTE 'private_payload'; END; $$;",
+            "Unsupported DO",
+        ),
+        (
+            "DO $missing$ BEGIN RAISE NOTICE 'private_payload'; END;",
+            "Unterminated SQL token",
+        ),
+    ],
+    ids=["dynamic-do", "unclosed-dollar-quote"],
+)
+def test_unsupported_postgres_input_preserves_both_outputs(tmp_path, body, reason):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1.sql").write_text(
+        "CREATE TABLE keep(id int);\n" + body, encoding="utf-8"
+    )
+    source, image = tmp_path / "schema.d2", tmp_path / "schema.svg"
+    source.write_text("old source", encoding="utf-8")
+    image.write_text("old image", encoding="utf-8")
+    result = cli(migrations, image, "--log-dir", tmp_path)
+    assert result.returncode == 1
+    assert source.read_text() == "old source"
+    assert image.read_text() == "old image"
+    assert reason in result.stderr
+    assert "private_payload" not in result.stdout + result.stderr
+    logs = list((tmp_path / "parse_log").glob("*.log"))
+    assert len(logs) == 1
+    assert reason in logs[0].read_text()
+    assert "private_payload" not in logs[0].read_text()
+
+
 def test_output_directory_is_not_writable_file(tmp_path):
     parent = tmp_path / "blocked"
     parent.write_text("file", encoding="utf-8")
