@@ -15,14 +15,15 @@ Use Python **3.11+** and **D2 0.7.1**. Local validation used Python 3.14; CI is 
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 
 # Install D2 0.7.1 from its official release, then verify it:
 d2 --version
 d2 layout elk
 
 # Generate generated/schema.d2 and generated/schema.svg from the sample migrations:
-make run
+python -m erd_generator ./db/migration ./generated/schema.svg
 ```
 
 Download D2 from the [official 0.7.1 release](https://github.com/d2lang/d2/releases/tag/v0.7.1). ELK is included; no separate ELK service is needed. `requirements.txt` installs runtime dependencies; `requirements-dev.txt` also installs pytest and Ruff. The original dependency installation surface still includes NetworkX/pydot for draw.io compatibility, but the D2 path does not import them.
@@ -30,47 +31,56 @@ Download D2 from the [official 0.7.1 release](https://github.com/d2lang/d2/relea
 Open `generated/schema.svg` in a browser. Only producing `.d2` source requires no D2 executable:
 
 ```bash
-make gen
+python -m erd_generator ./db/migration ./generated/schema.d2
 ```
 
 ## Generate your diagram
 
 ```bash
-.venv/bin/python -m erd_generator \
-  --migrations ./db/migration \
-  --out ./generated/schema.d2 \
-  --show-types \
-  --fk-config sample_fk_config.yaml \
-  --render svg
+python -m erd_generator SQL_DIR OUTPUT
 ```
 
-Omit `--render svg` to generate source only. The image always uses the same directory and filename stem as the `.d2` source. Generated files are overwritten by regeneration; edit migrations, FK configuration or generation options rather than the generated files.
+Both paths are required. `SQL_DIR` is the migration directory. The output extension selects what to generate:
 
-Make accepts equivalent overrides:
+| Output | Files written | D2 executable required? |
+| --- | --- | --- |
+| `./generated/schema.svg` | `schema.svg` and `schema.d2` in `./generated/` | Yes |
+| `./generated/schema.d2` | `schema.d2` only | No |
+
+The short command defaults to ELK, clean styling, rightward layout and visible column types. Additional FK YAML is loaded only when explicitly supplied. No example relationships or input/output paths are selected implicitly.
+
+Optional overrides follow the two paths:
 
 ```bash
-make run MIGRATIONS=/path/to/migrations SOURCE=generated/project.d2 FK_CONFIG=/path/to/fks.yaml
-make gen MIGRATIONS=/path/to/migrations FK_CONFIG=
-make run STYLE=classic
+python -m erd_generator ./db/migration ./generated/schema.svg --fk-config ./sample_fk_config.yaml
+python -m erd_generator ./db/migration ./generated/schema.svg --direction down
+python -m erd_generator ./db/migration ./generated/schema.d2 --hide-types
 ```
+
+Quote paths containing spaces. Generated files are overwritten by regeneration; edit migrations, FK configuration or generation options rather than the generated files.
 
 | Option | Behavior |
 | --- | --- |
-| `--migrations PATH` | Required migration directory; scans SQL recursively |
-| `--out PATH` | Required `.d2` source output; `.drawio`/`.xml` for the legacy backend |
-| `--format d2\|drawio` | Module entrypoint defaults to `d2` |
 | `--style clean\|classic` | D2 visual preset, default `clean`; `classic` restores the original appearance |
-| `--show-types` | Display SQL column types; otherwise retain names and constraints |
+| `--hide-types` | Hide SQL column types; retain names and constraints |
+| `--show-types` | Explicitly display SQL column types; already enabled for the short command |
 | `--fk-config PATH` | Add relationships declared in YAML |
-| `--layout elk` | D2 always uses ELK; draw.io accepts `grid` or `graphviz` |
+| `--layout elk` | D2 always uses ELK; normally omitted |
 | `--direction right\|left\|up\|down` | Global D2 direction, default `right` |
-| `--render svg` | Render source with the pinned D2 CLI |
-| `--d2-binary PATH` | Rendering executable, default `d2`; requires `--render` |
-| `--render-timeout SECONDS` | Positive timeout per D2 process, default 120; requires `--render` |
-| `--force-appendix` | Display tooltip contents in the SVG appendix; requires `--render` |
+| `--d2-binary PATH` | Rendering executable, default `d2`; requires SVG output |
+| `--render-timeout SECONDS` | Positive timeout per D2 process, default 120; requires SVG output |
+| `--force-appendix` | Display tooltip contents in the SVG appendix; requires SVG output |
 | `--log-dir PATH` | Write detected SQL/configuration diagnostics to `PATH/parse_log/`; default working directory |
 
 The main command logs table, column and foreign-key counts, rendering version/layout and duration. Invalid options return exit code 2; generation/rendering errors return 1; complete requested output returns 0.
+
+Existing named commands remain supported, including `--render svg` with a `.d2` output:
+
+```bash
+python -m erd_generator --migrations ./db/migration --out ./generated/schema.d2 --show-types --render svg
+```
+
+Use either the two positional paths or `--migrations` plus `--out`; mixing them is rejected. Named commands retain their previous defaults: column types are hidden unless `--show-types` is supplied, and a `.d2` output does not render unless `--render svg` is supplied. Named `--out` also accepts `.svg`. To roll back to the previous invocation style, keep using the named command; existing scripts and Makefile targets continue to work. The positional form is for D2; explicit draw.io commands are documented below.
 
 ## Table and relationship behavior
 
@@ -87,7 +97,7 @@ This replaces draw.io's fixed note blocks beneath each table with tooltips/appen
 
 See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lang.com/tour/elk/) for the upstream rendering model.
 
-Use `--style classic` (or `make run STYLE=classic`) to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. `--style` applies only to D2. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
+Use `--style classic` to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. `--style` applies only to D2. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
 
 ## Relationships without database FK constraints
 
@@ -162,7 +172,7 @@ Rollback of the default workflow consists of explicitly invoking the old command
 ```text
 erd_generator/
   __main__.py          # primary python -m entrypoint (D2 default)
-  cli.py               # common argument validation and orchestration
+  cli.py               # explicit input/output CLI, argument validation and orchestration
   schema.py            # output-independent schema contract
   sql_parser.py        # SQL adapters and per-run loading result
   diagnostics.py       # shared diagnostics (ParseFailure remains re-exported)
@@ -194,16 +204,20 @@ The new explicit loading API is `erd_generator.sql_parser.load_schema_result(pat
 ## Development and validation
 
 ```bash
-make build && make test
-make lint
-make test-integration
-make run
-make benchmark
+python -m pip install -r requirements-dev.txt
+python -m compileall -q erd_generator scripts gen_drawio_erd_table.py parse_drawio_edges.py compare_drawio_to_migrations.py
+python -m pytest -q -m 'not integration'
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest -q -m integration
+python -m erd_generator ./db/migration ./generated/schema.svg
+python scripts/benchmark_rendering.py --tables 50
+python scripts/benchmark_rendering.py --tables 200
 ```
 
-`make test` runs fast tests without requiring D2. `make test-integration` requires exactly D2 0.7.1 and bundled ELK; missing dependencies fail rather than skip rendering validation. `make format` formats new/rewritten modules while preserving formatting of untouched legacy files. Override `PYTHON=python` when using an already activated environment.
+The `not integration` marker runs fast tests without requiring D2. The `integration` marker requires exactly D2 0.7.1 and bundled ELK; missing dependencies fail rather than skip rendering validation. `python -m ruff format .` formats new/rewritten modules while preserving formatting of untouched legacy files.
 
-`make benchmark` separately renders deterministic 50- and 200-table synthetic inputs. Each case writes source, SVG and `metrics.json` under `generated/benchmark-N/`, including duration, peak child-process RSS, output bytes and dimensions. These measurements do not predict every production graph's readability or runtime.
+The benchmark script separately renders deterministic 50- and 200-table synthetic inputs. Each case writes source, SVG and `metrics.json` under `generated/benchmark-N/`, including duration, peak child-process RSS, output bytes and dimensions. These measurements do not predict every production graph's readability or runtime.
 
 CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command. [Migration design](docs/plans/d2-elk-migration.md) describes boundaries and rollback stages; [local validation](docs/validation/d2-elk.md) records measured results and remaining limits.
 

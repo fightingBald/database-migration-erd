@@ -20,15 +20,45 @@ LOGGER = logging.getLogger(__name__)
 
 
 def build_parser(*, default_format: str = "drawio") -> argparse.ArgumentParser:
+    positional_io = default_format == "d2"
     parser = argparse.ArgumentParser(
         description="Generate D2/ELK or draw.io ERDs from migration SQL",
         allow_abbrev=False,
+        usage="%(prog)s SQL_DIR OUTPUT [options]" if positional_io else None,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  %(prog)s ./db/migration ./generated/schema.svg\n"
+            "  %(prog)s ./db/migration ./generated/schema.d2\n\n"
+            "SVG output also writes same-stem D2 source. D2 output alone does not\n"
+            "require the D2 executable. Short-form defaults: types shown, clean\n"
+            "style, ELK layout. --migrations/--out remain supported."
+        )
+        if positional_io
+        else None,
+    )
+    if positional_io:
+        parser.add_argument(
+            "sql_dir",
+            nargs="?",
+            metavar="SQL_DIR",
+            help="Input migration SQL directory",
+        )
+        parser.add_argument(
+            "output_path",
+            nargs="?",
+            metavar="OUTPUT",
+            help="Output .svg image (plus .d2 source), or .d2 source only",
+        )
+    parser.add_argument(
+        "--migrations",
+        required=not positional_io,
+        help="Named input directory; use together with --out",
     )
     parser.add_argument(
-        "--migrations", required=True, help="Directory containing migration SQL files"
-    )
-    parser.add_argument(
-        "--out", required=True, help="Output .d2 source or .drawio document"
+        "--out",
+        required=not positional_io,
+        help="Named output path; use together with --migrations",
     )
     parser.add_argument(
         "--format",
@@ -36,9 +66,21 @@ def build_parser(*, default_format: str = "drawio") -> argparse.ArgumentParser:
         default=default_format,
         help=f"Output backend (default: {default_format})",
     )
-    parser.add_argument(
-        "--show-types", action="store_true", help="Include column data types"
+    types = parser.add_mutually_exclusive_group()
+    types.add_argument(
+        "--show-types",
+        action="store_true",
+        default=None if positional_io else False,
+        help="Include column data types (default with SQL_DIR OUTPUT)",
     )
+    if positional_io:
+        types.add_argument(
+            "--hide-types",
+            dest="show_types",
+            action="store_false",
+            default=None,
+            help="Omit column data types",
+        )
     parser.add_argument(
         "--fk-config", help="YAML file containing additional foreign keys"
     )
@@ -73,7 +115,7 @@ def build_parser(*, default_format: str = "drawio") -> argparse.ArgumentParser:
     d2.add_argument(
         "--force-appendix",
         action="store_true",
-        help="Show tooltip notes in the SVG appendix (render only)",
+        help="Show tooltip notes in the SVG appendix (SVG output only)",
     )
     legacy = parser.add_argument_group("draw.io layout options")
     legacy.add_argument(
@@ -89,13 +131,35 @@ def build_parser(*, default_format: str = "drawio") -> argparse.ArgumentParser:
     return parser
 
 
+def _resolve_arguments(args: argparse.Namespace) -> None:
+    sql_dir = getattr(args, "sql_dir", None)
+    output_path = getattr(args, "output_path", None)
+    positional_io = sql_dir is not None or output_path is not None
+    if positional_io:
+        if args.migrations is not None or args.out is not None:
+            raise ValueError(
+                "use SQL_DIR OUTPUT or --migrations/--out, without mixing the two forms"
+            )
+        if sql_dir is None or output_path is None:
+            raise ValueError("both SQL_DIR and OUTPUT are required")
+        if args.format != "d2":
+            raise ValueError("SQL_DIR OUTPUT is only supported for D2")
+        args.migrations, args.out = sql_dir, output_path
+    elif args.migrations is None or args.out is None:
+        raise ValueError("provide SQL_DIR OUTPUT or both --migrations and --out")
+    if args.show_types is None:
+        # Keep the named command's historical default while making the short
+        # command useful without an extra --show-types flag.
+        args.show_types = positional_io
+
+
 def _validate_options(args: argparse.Namespace) -> None:
     suffix = Path(args.out).suffix.lower()
     if args.format == "d2":
-        if suffix != ".d2":
-            raise ValueError(
-                "D2 output must use the .d2 extension; use --render svg for an image"
-            )
+        if suffix not in (".d2", ".svg"):
+            raise ValueError("D2 output must use .svg for an image or .d2 for source")
+        if suffix == ".svg":
+            args.render = "svg"
         if args.layout not in (None, "elk"):
             raise ValueError("D2 requires --layout elk")
         if any(
@@ -114,7 +178,7 @@ def _validate_options(args: argparse.Namespace) -> None:
             or args.force_appendix
         ):
             raise ValueError(
-                "D2 executable, timeout and appendix options require --render svg"
+                "D2 executable, timeout and appendix options require .svg output or --render svg"
             )
         if args.render:
             D2RenderConfig(
@@ -196,7 +260,7 @@ def _write_drawio(args: argparse.Namespace, schema: dict, output: Path) -> None:
 
 
 def run_cli(args: argparse.Namespace) -> int:
-    source_written = False
+    written_source: Path | None = None
     try:
         result = load_schema_result(args.migrations)
         schema, failures = result.schema, result.failures
@@ -221,18 +285,26 @@ def run_cli(args: argparse.Namespace) -> int:
         if args.format == "d2":
             from .d2 import build_d2
 
+            source_output = (
+                output.with_suffix(".d2") if output.suffix.lower() == ".svg" else output
+            )
+            svg_output = (
+                output
+                if output.suffix.lower() == ".svg"
+                else output.with_suffix(".svg")
+            )
             source = build_d2(
                 schema,
                 show_types=args.show_types,
                 direction=args.direction or "right",
                 style=args.style or "clean",
             )
-            _write_source(output, source)
-            source_written = True
+            _write_source(source_output, source)
+            written_source = source_output
             if args.render:
                 render_d2(
-                    output,
-                    output.with_suffix(".svg"),
+                    source_output,
+                    svg_output,
                     D2RenderConfig(
                         executable=args.d2_binary or "d2",
                         timeout=args.render_timeout
@@ -250,18 +322,18 @@ def run_cli(args: argparse.Namespace) -> int:
             sum(len(t.columns) for t in schema.values()),
             sum(len(t.foreign_keys) for t in schema.values()),
         )
-        print(f"Diagram written to {output}")
+        print(f"Diagram written to {written_source or output}")
         if args.render:
-            print(f"SVG written to {output.with_suffix('.svg')}")
+            print(f"SVG written to {svg_output}")
         return 0
     except (ValueError, OSError, D2RenderError) as exc:
         message = (
             "input is not valid UTF-8" if isinstance(exc, UnicodeError) else str(exc)
         )
         print(f"ERD generation failed: {message}", file=sys.stderr)
-        if source_written and args.render:
+        if written_source is not None and args.render:
             print(
-                f"D2 source retained at {args.out}; SVG was not updated.",
+                f"D2 source retained at {written_source}; SVG was not updated.",
                 file=sys.stderr,
             )
         return 1
@@ -271,6 +343,7 @@ def main(argv: list[str] | None = None, *, default_format: str = "drawio") -> in
     parser = build_parser(default_format=default_format)
     args = parser.parse_args(argv)
     try:
+        _resolve_arguments(args)
         _validate_options(args)
     except ValueError as exc:
         parser.error(str(exc))
