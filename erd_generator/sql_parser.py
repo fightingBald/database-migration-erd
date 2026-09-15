@@ -21,6 +21,7 @@ from .postgres_commands import (
     neutral_command,
     routine_definition,
 )
+from .postgres_do import neutral_do_body
 from .schema import (
     Column,
     ForeignKey,
@@ -632,6 +633,11 @@ def _parse_sql(
                 body = extract_do_body(raw_statement, tokens)
             except (UnsupportedDoError, SQLLexError) as exc:
                 _record_failure(failures, source, "", str(exc), line=start_line)
+                continue
+            if neutral_do_body(body.sql):
+                logging.getLogger(__name__).debug(
+                    "SQL skipped for ERD: neutral DO block at %s:%s", source or "<input>", start_line
+                )
                 continue
             staged = deepcopy(schema)
             block_failures: List[ParseFailure] = []

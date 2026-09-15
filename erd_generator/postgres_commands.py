@@ -106,8 +106,9 @@ class UnsupportedDoError(ValueError):
 
 
 DO_STATEMENT_ERROR = (
-    "Unsupported DO statement: only static table/index DDL and ERD-neutral commands "
-    "are supported; conditions, loops, calls and dynamic SQL are not evaluated"
+    "Unsupported DO statement: expected static table/index DDL or a provably "
+    "ERD-neutral setup block; unknown conditions, loops, calls and dynamic SQL "
+    "are not evaluated (see dev_guide.md)"
 )
 
 

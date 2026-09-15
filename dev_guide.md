@@ -110,7 +110,8 @@ Statement splitting uses the pinned sqlglot PostgreSQL tokenizer. It preserves `
 | Standalone `CREATE SCHEMA`, including `IF NOT EXISTS` and `AUTHORIZATION` | Skip the namespace declaration. |
 | `CREATE FUNCTION` / `CREATE PROCEDURE` with ordinary string or dollar-quoted bodies | Skip the definition; never apply its body as if the routine had been called. |
 | Dollar-quoted, straight-line PL/pgSQL `DO ... BEGIN ... END` | Apply the existing supported table/index DDL subset in order. Permission/setup commands, `NULL` and literal-only `RAISE NOTICE`/`INFO`/`DEBUG`/`LOG`/`WARNING` statements are skipped. |
-| Conditional or dynamic blocks, declarations, nested blocks, exception handlers, calls or expression evaluation | Report unsupported input; do not assume which schema changes occur. |
+| Wholly ERD-neutral `DO` blocks with role checks or `EXECUTE format(...)` | Skip only after checking every branch, command template and argument against the rules below. |
+| Other conditional/dynamic blocks, declarations, loops, nested `BEGIN` blocks, exception handlers or calls | Report unsupported input; do not assume which schema changes occur. |
 | `CREATE SCHEMA` containing object definitions, `ALTER SCHEMA`, `DROP SCHEMA` | Report unsupported input; these can change diagram objects. |
 
 For example, this static block is supported:
@@ -125,11 +126,34 @@ END;
 $migration$;
 ```
 
-The optional `LANGUAGE plpgsql` clause may appear before or after the dollar-quoted body. This is static schema extraction, not a PL/pgSQL interpreter or a database execution check. `IF`, loops, `EXECUTE`, `CALL`, `PERFORM`, variable declarations and nested `DO` blocks remain unsupported. Unqualified names retain the parser's existing `search_path` limitations; use qualified names when schema identity matters.
+The optional `LANGUAGE plpgsql` clause may appear before or after the dollar-quoted body. The final `END` may omit its semicolon. Migration comments such as `-- +migrate StatementBegin` and `-- +migrate StatementEnd` remain comments.
 
-Each supported `DO` block is applied to a temporary Schema copy. If any statement in the block fails, none of its changes reach the caller's Schema. The loader can still collect later statements for diagnostics, but any error prevents D2/SVG output from being replaced. Use ordinary DDL or a reviewed schema snapshot for migrations whose structural effects require runtime evaluation; there is no option to silently ignore unknown blocks.
+Common role/permission setup is supported, including the complete [analytics reader migration regression fixture](tests/fixtures/postgres_role_setup.sql):
 
-The allowlist classifies structural impact and does not validate every PostgreSQL permission or role option. Skipped command categories and static block completion are logged at DEBUG without SQL payloads. No additional dependencies, CLI flags or database connection are required. Reverting this parser change restores the previous parsing behavior; no database rollback is involved.
+```sql
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'analytics_reader') THEN
+        CREATE ROLE analytics_reader NOLOGIN;
+    END IF;
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO analytics_reader', CURRENT_DATABASE());
+END
+$$;
+```
+
+The neutral-block allowlist has deliberately bounded rules:
+
+- Conditions may be `TRUE`/`FALSE`, optionally preceded by `NOT`, or `[NOT] EXISTS (SELECT ... FROM pg_roles WHERE rolname = 'name')`. `pg_authid`/`rolname` and `pg_user`/`usename` also qualify; `pg_catalog.` is optional. The SELECT list may be empty, `1`, `*` or the name column. Aliases, joins, additional predicates and arbitrary functions are unsupported.
+- `IF`/`ELSIF`/`ELSE` and nested `IF` are checked across **all** branches; no condition is evaluated. Every statement must be one of the setup/no-op commands above or an accepted `EXECUTE`. A block mixing these conditional/dynamic constructs with table/index DDL remains unsupported.
+- `EXECUTE` accepts an ordinary/dollar-quoted constant SQL string or `format`/`pg_catalog.format` with a constant template. Every SQL command in that string must be ERD-neutral. A template containing both a grant and a table change is rejected.
+- Supported format slots are `%I`, `%L`, positional forms such as `%1$I`, and `%%`. Slots must occupy complete SQL tokens outside existing strings, quoted identifiers or comments. `%s`, width/flags, concatenation, variable templates and `USING` are unsupported. These boundaries follow PostgreSQL's [format quoting rules](https://www.postgresql.org/docs/current/functions-string.html#FUNCTIONS-STRING-FORMAT).
+- Arguments may be ordinary/dollar-quoted string literals, `CURRENT_USER`, `CURRENT_ROLE`, `SESSION_USER`, `CURRENT_DATABASE()` or `CURRENT_SCHEMA()`; the two function calls may use `pg_catalog.`. Every argument is checked, including unused ones. Arbitrary calls, subqueries and casts are rejected.
+
+This is static schema extraction, not a PL/pgSQL interpreter or a database execution check. Loops, `CALL`, `PERFORM`, declarations and nested `DO` remain unsupported. The rules assume standard PostgreSQL catalog/builtin semantics; unqualified names retain the parser's existing `search_path` limitations. Use qualified names when schema identity matters.
+
+Supported `DO` blocks containing structural DDL are applied to a temporary Schema copy. If any statement in the block fails, none of its changes reach the caller's Schema. The loader can still collect later statements for diagnostics, but any error prevents D2/SVG output from being replaced. Use ordinary DDL or a reviewed schema snapshot for migrations whose structural effects require runtime evaluation; there is no option to silently ignore unknown blocks.
+
+The allowlist classifies structural impact and does not validate every PostgreSQL permission or role option. Skipped command categories and static block completion are logged at DEBUG without SQL payloads. No additional dependencies, CLI flags or database connection are required. Reverting the neutral-block extension restores the previous rejection of conditional/dynamic blocks while retaining dollar quoting and static DDL support; no database rollback is involved.
 
 ## Migration loading and errors
 
@@ -189,6 +213,7 @@ erd_generator/
   sql_parser.py        # SQL adapters and per-run loading result
   sql_statements.py    # PostgreSQL tokenization and statement boundaries
   postgres_commands.py # ERD-neutral allowlist and bounded DO block extraction
+  postgres_do.py       # whole-block role/permission checks and constant SQL templates
   diagnostics.py       # shared diagnostics (ParseFailure remains re-exported)
   fk_config.py         # YAML relationship loading/resolution
   validation.py        # FK integrity checks and normalized relationships
@@ -212,6 +237,8 @@ generated/            # ignored generated source, SVG and benchmark output
 .github/workflows/    # build/test/lint and real ELK checks
 docs/                 # migration design and local validation record
 ```
+
+SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation.
 
 The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True, style="clean")` and never mutates its input; `style="classic"` preserves the original D2 output style.
 

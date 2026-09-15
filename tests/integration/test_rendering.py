@@ -202,3 +202,38 @@ def test_postgres_do_migration_renders_real_svg(tmp_path):
     }
     assert {"app.parent", "app.child", "parent_id"}.issubset(texts)
     assert "layout=elk" in result.stderr
+
+
+def test_analytics_role_migration_renders_real_svg(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1.sql").write_text(
+        "CREATE SCHEMA analytics_v1;\n"
+        "CREATE TABLE analytics_v1.accounts(id int PRIMARY KEY);\n"
+        "CREATE TABLE analytics_v1.events(id int, account_id int REFERENCES analytics_v1.accounts(id));\n"
+        + (ROOT / "tests/fixtures/postgres_role_setup.sql").read_text(),
+        encoding="utf-8",
+    )
+    output = tmp_path / "schema.svg"
+    result = subprocess.run(
+        [sys.executable, "-m", "erd_generator", str(migrations), str(output)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    source = output.with_suffix(".d2").read_text()
+    assert source.count("shape: sql_table") == 2
+    assert (
+        '"analytics_v1.events"."account_id" -> "analytics_v1.accounts"."id"' in source
+    )
+    texts = {
+        "".join(element.itertext())
+        for element in ET.parse(output).getroot().iter(NS + "text")
+    }
+    assert {"analytics_v1.accounts", "analytics_v1.events", "account_id"}.issubset(
+        texts
+    )
+    assert "analytics_reader" not in texts
+    assert "layout=elk" in result.stderr
