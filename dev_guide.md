@@ -99,6 +99,38 @@ In the D2 path, a short table name must resolve unambiguously. Wrong qualified n
 
 SQL `REFERENCES table` without column names is supported when the target has a single primary-key column. Omitted composite references fail clearly because the existing Schema stores primary keys as an unordered set; it cannot safely infer the declaration order. Explicit composite reference columns are supported.
 
+## PostgreSQL blocks and setup statements
+
+Statement splitting uses the pinned sqlglot PostgreSQL tokenizer. It preserves `$$...$$` and `$tag$...$tag$` literals, quoted strings/identifiers and nested block comments, so their internal semicolons do not split statements. Tags are case-sensitive. Unterminated tokens produce a sanitized diagnostic with the input file and statement line.
+
+| Input | ERD behavior |
+| --- | --- |
+| `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES` | Skip permission changes. |
+| `CREATE ROLE`, `CREATE USER` | Skip account creation; credentials are not logged. |
+| Standalone `CREATE SCHEMA`, including `IF NOT EXISTS` and `AUTHORIZATION` | Skip the namespace declaration. |
+| `CREATE FUNCTION` / `CREATE PROCEDURE` with ordinary string or dollar-quoted bodies | Skip the definition; never apply its body as if the routine had been called. |
+| Dollar-quoted, straight-line PL/pgSQL `DO ... BEGIN ... END` | Apply the existing supported table/index DDL subset in order. Permission/setup commands, `NULL` and literal-only `RAISE NOTICE`/`INFO`/`DEBUG`/`LOG`/`WARNING` statements are skipped. |
+| Conditional or dynamic blocks, declarations, nested blocks, exception handlers, calls or expression evaluation | Report unsupported input; do not assume which schema changes occur. |
+| `CREATE SCHEMA` containing object definitions, `ALTER SCHEMA`, `DROP SCHEMA` | Report unsupported input; these can change diagram objects. |
+
+For example, this static block is supported:
+
+```sql
+CREATE SCHEMA app;
+DO $migration$
+BEGIN
+    CREATE TABLE app.items (id integer PRIMARY KEY);
+    ALTER TABLE app.items ADD COLUMN label text;
+END;
+$migration$;
+```
+
+The optional `LANGUAGE plpgsql` clause may appear before or after the dollar-quoted body. This is static schema extraction, not a PL/pgSQL interpreter or a database execution check. `IF`, loops, `EXECUTE`, `CALL`, `PERFORM`, variable declarations and nested `DO` blocks remain unsupported. Unqualified names retain the parser's existing `search_path` limitations; use qualified names when schema identity matters.
+
+Each supported `DO` block is applied to a temporary Schema copy. If any statement in the block fails, none of its changes reach the caller's Schema. The loader can still collect later statements for diagnostics, but any error prevents D2/SVG output from being replaced. Use ordinary DDL or a reviewed schema snapshot for migrations whose structural effects require runtime evaluation; there is no option to silently ignore unknown blocks.
+
+The allowlist classifies structural impact and does not validate every PostgreSQL permission or role option. Skipped command categories and static block completion are logged at DEBUG without SQL payloads. No additional dependencies, CLI flags or database connection are required. Reverting this parser change restores the previous parsing behavior; no database rollback is involved.
+
 ## Migration loading and errors
 
 Versioned files named `V<number>__description.sql` are ordered numerically, including dot/underscore version components; `V2` precedes `V10`. Non-versioned filenames follow versioned files in path order. This is a file ordering contract, not a complete Flyway migration-history implementation. Keep version names unique and include the complete migration history.
@@ -155,6 +187,8 @@ erd_generator/
   cli.py               # explicit input/output CLI, argument validation and orchestration
   schema.py            # output-independent schema contract
   sql_parser.py        # SQL adapters and per-run loading result
+  sql_statements.py    # PostgreSQL tokenization and statement boundaries
+  postgres_commands.py # ERD-neutral allowlist and bounded DO block extraction
   diagnostics.py       # shared diagnostics (ParseFailure remains re-exported)
   fk_config.py         # YAML relationship loading/resolution
   validation.py        # FK integrity checks and normalized relationships
@@ -207,6 +241,6 @@ The parser supports a practical PostgreSQL DDL subset: CREATE TABLE, common ALTE
 
 The sample plus YAML has **5 tables, 21 columns, 5 FKs and 7 unique/index records** after all migrations. Both the original inline email UNIQUE and the later explicitly named email UNIQUE remain represented.
 
-CHECK/default changes, partitioning, views, enums, stored procedures, search_path resolution and all exotic DDL are not fully modeled. Some are ignored by the existing parser and some yield diagnostics; zero diagnostics do not prove complete PostgreSQL interpretation. Quoted identifier normalization and index-expression rewrites retain existing parser limitations.
+CHECK/default changes, partitioning, views, enums, routine execution, search_path resolution and all exotic DDL are not fully modeled. Routine definitions and supported setup statements are ignored as described above; unsupported procedural execution and schema mutations yield diagnostics. Some other constructs are still ignored by the existing parser, so zero diagnostics do not prove complete PostgreSQL interpretation. Quoted identifier normalization and index-expression rewrites retain existing parser limitations.
 
 ELK uses hierarchical layout. Dense/large diagrams may contain crossings, extra bends or become wide; there is no automatic business-domain splitting or fixed-coordinate placement. SVG is intended for browser viewing. PNG/PDF and their browser dependencies are outside the first release.

@@ -170,3 +170,35 @@ def test_composite_and_cyclic_relations_compile(tmp_path):
         for e in ET.parse(tmp_path / "composite.svg").getroot().iter(NS + "text")
     ]
     assert "fk_parent [1/2]" in texts and "fk_parent [2/2]" in texts
+
+
+def test_postgres_do_migration_renders_real_svg(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1.sql").write_text(
+        "CREATE SCHEMA app;\n"
+        "CREATE ROLE reader NOLOGIN;\n"
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA app GRANT SELECT ON TABLES TO reader;\n"
+        "DO $ddl$\nBEGIN\n"
+        "CREATE TABLE app.parent(id int PRIMARY KEY);\n"
+        "CREATE TABLE app.child(id int PRIMARY KEY, parent_id int REFERENCES app.parent(id));\n"
+        "END;\n$ddl$;\n"
+        "CREATE FUNCTION never_called() RETURNS void LANGUAGE plpgsql AS $$BEGIN DROP TABLE app.parent; END;$$;\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "schema.svg"
+    result = subprocess.run(
+        [sys.executable, "-m", "erd_generator", str(migrations), str(output)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    source = output.with_suffix(".d2").read_text()
+    assert '"app.child"."parent_id" -> "app.parent"."id"' in source
+    texts = {
+        "".join(e.itertext()) for e in ET.parse(output).getroot().iter(NS + "text")
+    }
+    assert {"app.parent", "app.child", "parent_id"}.issubset(texts)
+    assert "layout=elk" in result.stderr
