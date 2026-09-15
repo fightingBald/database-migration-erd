@@ -64,22 +64,33 @@ def test_golden_source_matches_and_compiles(tmp_path, style):
         assert connections and all(e.get("stroke") == "#64748B" for e in connections)
 
 
-def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path):
+@pytest.mark.parametrize("syntax", ["named", "positional", "positional-uppercase"])
+def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax):
     env = dict(os.environ, D2_LAYOUT="dagre", D2_WATCH="true")
+    output = tmp_path / (
+        "schema.SVG" if syntax == "positional-uppercase" else "schema.svg"
+    )
+    arguments = (
+        [
+            "--migrations",
+            str(ROOT / "db/migration"),
+            "--out",
+            str(tmp_path / "schema.d2"),
+            "--show-types",
+            "--render",
+            "svg",
+        ]
+        if syntax == "named"
+        else [str(ROOT / "db/migration"), str(output)]
+    )
+    if syntax != "positional":
+        arguments.extend(["--fk-config", str(ROOT / "sample_fk_config.yaml")])
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "erd_generator",
-            "--migrations",
-            str(ROOT / "db/migration"),
-            "--out",
-            str(tmp_path / "schema.d2"),
-            "--fk-config",
-            str(ROOT / "sample_fk_config.yaml"),
-            "--show-types",
-            "--render",
-            "svg",
+            *arguments,
         ],
         cwd=ROOT,
         env=env,
@@ -89,8 +100,13 @@ def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "layout=elk" in result.stderr
-    root = ET.parse(tmp_path / "schema.svg").getroot()
+    source = tmp_path / "schema.d2"
+    assert str(source) in result.stdout and str(output) in result.stdout
+    assert '"id": "BIGSERIAL" {constraint: primary_key}' in source.read_text()
+    assert set(tmp_path.iterdir()) == {source, output}
+    root = ET.parse(output).getroot()
     texts = ["".join(e.itertext()) for e in root.iter(NS + "text")]
+    assert "BIGSERIAL" in texts
     assert {t for t in texts if t.startswith("public.")} == {
         "public.users",
         "public.purchase_orders",
