@@ -1,5 +1,2 @@
 sqlglot==30.18.0
-networkx==3.6.1
 PyYAML==6.0.3
-pydot==4.0.1
-pyparsing==3.3.2

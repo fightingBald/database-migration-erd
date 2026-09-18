@@ -2,6 +2,8 @@
 
 Turn PostgreSQL migration SQL into ER diagrams with **D2 + ELK**. No database connection needed.
 
+Outputs are `.d2` source and `.svg` images. D2 + ELK is the only backend.
+
 ## Features
 
 - Show tables, columns, data types, keys and relationships.

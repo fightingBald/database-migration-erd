@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -9,12 +8,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def cli(*args, legacy=False, env=None):
-    entry = (
-        [str(ROOT / "gen_drawio_erd_table.py")] if legacy else ["-m", "erd_generator"]
-    )
+def cli(*args, env=None):
     return subprocess.run(
-        [sys.executable, *entry, *map(str, args)],
+        [sys.executable, "-m", "erd_generator", *map(str, args)],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -146,7 +142,7 @@ def test_required_paths_and_mixed_syntax_fail_before_writing(
 
 @pytest.mark.parametrize(
     "suffix,options",
-    [("png", []), ("", []), ("drawio", []), ("drawio", ["--format", "drawio"])],
+    [("png", []), ("", []), ("drawio", []), ("xml", [])],
 )
 def test_positional_output_rejects_unsupported_formats(
     tmp_path, simple_migrations, suffix, options
@@ -236,18 +232,6 @@ def test_invalid_layout_configuration_preserves_both_outputs(
     assert source.read_text() == "old source" and svg.read_text() == "old image"
 
 
-def test_drawio_rejects_layout_configuration(tmp_path):
-    result = cli(
-        *sample_args(tmp_path, "drawio"),
-        "--format",
-        "drawio",
-        "--layout-config",
-        tmp_path / "missing.yaml",
-    )
-    assert result.returncode == 2
-    assert "not applicable to draw.io" in result.stderr
-
-
 def test_clean_style_is_default_and_classic_can_be_selected(tmp_path):
     args = sample_args(tmp_path)
     result = cli(*args)
@@ -275,50 +259,10 @@ def test_grouping_can_be_disabled_without_changing_the_default_command(tmp_path)
     assert "_erd_group_" not in output.read_text()
 
 
-def test_d2_grouping_is_rejected_for_drawio(tmp_path):
-    result = cli(
-        *sample_args(tmp_path, "drawio"), "--format", "drawio", "--grouping", "auto"
-    )
-    assert result.returncode == 2
-    assert not (tmp_path / "schema.drawio").exists()
-
-
-@pytest.mark.parametrize("style", ["clean", "classic"])
-def test_d2_style_is_rejected_for_drawio(tmp_path, style):
-    result = cli(
-        *sample_args(tmp_path, "drawio"), "--format", "drawio", "--style", style
-    )
-    assert result.returncode == 2
-    assert not (tmp_path / "schema.drawio").exists()
-
-
-def test_d2_path_does_not_import_drawio_dependencies(tmp_path):
-    program = """
-import importlib.abc, runpy, sys
-class BlockLegacy(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'networkx', 'pydot'} or fullname in {'erd_generator.drawio', 'erd_generator.layout'}:
-            raise ImportError('legacy dependency imported: ' + fullname)
-sys.meta_path.insert(0, BlockLegacy())
-runpy.run_module('erd_generator', run_name='__main__')
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", program, *map(str, sample_args(tmp_path))],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 @pytest.mark.parametrize("positional", [False, True], ids=["named", "positional"])
 @pytest.mark.parametrize(
     "options",
     [
-        ["--layout", "grid"],
-        ["--per-row", "0"],
-        ["--graphviz-scale", "1"],
         ["--direction", "diagonal"],
         ["--render-timeout", "0", "--render", "svg"],
         ["--force-appendix"],
@@ -337,25 +281,6 @@ def test_mismatched_extension_rejected(tmp_path):
     result = cli(*sample_args(tmp_path, "drawio"))
     assert result.returncode == 2
     assert not (tmp_path / "schema.drawio").exists()
-
-
-def test_legacy_and_explicit_drawio_generate_same_document(tmp_path):
-    args = sample_args(tmp_path, "drawio")
-    result = cli(*args, "--show-types", legacy=True)
-    assert result.returncode == 0, result.stderr
-    expected = ET.parse(tmp_path / "schema.drawio").getroot()
-    assert expected.tag == "mxfile"
-    expected_bytes = (tmp_path / "schema.drawio").read_bytes()
-    result = cli(*args, "--format", "drawio", "--show-types")
-    assert result.returncode == 0, result.stderr
-    assert (tmp_path / "schema.drawio").read_bytes() == expected_bytes
-
-
-def test_invalid_drawio_layout_rejected(tmp_path):
-    result = cli(
-        *sample_args(tmp_path, "drawio"), "--format", "drawio", "--layout", "elk"
-    )
-    assert result.returncode == 2
 
 
 @pytest.mark.parametrize("positional", [False, True], ids=["named", "positional"])
@@ -496,15 +421,47 @@ def test_output_directory_is_not_writable_file(tmp_path):
     assert "Traceback" not in result.stderr
 
 
-def test_legacy_python_api_imports_remain_available():
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--format", "d2"],
+        ["--format", "drawio"],
+        ["--layout", "elk"],
+        ["--layout", "grid"],
+        ["--per-row", "2"],
+        ["--graphviz-prog", "dot"],
+        ["--graphviz-scale", "1"],
+        ["--graphviz-spacing", "100"],
+    ],
+)
+def test_removed_backend_options_fail_without_replacing_outputs(tmp_path, options):
+    source, image = tmp_path / "schema.d2", tmp_path / "schema.svg"
+    source.write_text("old source")
+    image.write_text("old image")
+    result = cli(*sample_args(tmp_path), *options)
+    assert result.returncode == 2
+    assert "unrecognized arguments" in result.stderr
+    assert source.read_text() == "old source"
+    assert image.read_text() == "old image"
+
+
+def test_python_entrypoint_uses_same_d2_workflow_as_module_cli(tmp_path):
     from erd_generator import (
         ParseFailure,
-        build_drawio,
+        build_d2,
         get_last_parse_failures,
         load_schema_from_migrations,
         main,
     )
 
-    assert callable(main) and callable(build_drawio)
+    arguments = sample_args(tmp_path, positional=True)
+    assert main(list(map(str, arguments))) == 0
+    source = tmp_path / "schema.d2"
+    expected = source.read_bytes()
+    result = cli(*arguments)
+    assert result.returncode == 0, result.stderr
+    assert source.read_bytes() == expected
+    assert "shape: sql_table" in source.read_text()
+    assert callable(build_d2)
     assert callable(get_last_parse_failures) and callable(load_schema_from_migrations)
     assert ParseFailure(None, "", "failure").reason == "failure"
