@@ -119,15 +119,16 @@ def centered_ranks(
     """Put eligible shared units between their neighbors, without fixed coordinates.
 
     These ranks only orient D2 source order; arrowheads still encode the FK.
-    Adjacent hubs receive separate ranks inside the central band. The remaining
-    independent units or colour classes are balanced by estimated cross size.
+    Explicit candidates take priority; otherwise business groups can be hubs too.
+    Adjacent hubs receive separate ranks inside the central band. Independent
+    outer components may rotate their colours to balance estimated cross size.
     """
     neighbors = {name: set() for name in names}
     for a, b in pairs:
         if a != b:
             neighbors[a].add(b)
             neighbors[b].add(a)
-    central = tuple(sorted(n for n in hubs if len(neighbors[n]) >= 3))
+    central = tuple(sorted(n for n in (hubs or names) if len(neighbors[n]) >= 3))
     remaining = tuple(sorted(set(names) - set(central)))
     if not central or len(remaining) < 2:
         return layout_ranks(names, pairs)
@@ -139,12 +140,7 @@ def centered_ranks(
         remaining,
         tuple((a, b) for a, b in pairs if a not in central and b not in central),
     )
-    if len(set(outer.values())) == 1:
-        loads = [0.0, 0.0]
-        for name in sorted(remaining, key=lambda n: (-weight[n], n)):
-            side = min(range(2), key=lambda i: (loads[i], i))
-            outer[name] = side
-            loads[side] += weight[name]
+    _balance_outer(outer, neighbors, weight)
     classes = max(outer.values()) + 1
     pivot = min(
         range(1, classes),
@@ -158,3 +154,36 @@ def centered_ranks(
         **{n: rank + (span if rank >= pivot else 0) for n, rank in outer.items()},
         **{n: pivot + rank for n, rank in inner.items()},
     }
+
+
+def _balance_outer(
+    ranks: dict[str, int], neighbors: dict[str, set[str]], weights: dict[str, float]
+) -> None:
+    """Rotate independent components' colours; adjacent nodes stay in distinct ranks."""
+    unseen = set(ranks)
+    components = []
+    while unseen:
+        pending = [min(unseen)]
+        component = []
+        while pending:
+            node = pending.pop()
+            if node not in unseen:
+                continue
+            unseen.remove(node)
+            component.append(node)
+            pending.extend(neighbors[node] & unseen)
+        components.append(tuple(sorted(component)))
+    classes = max(max(ranks.values()) + 1, 2)
+    loads = [0.0] * classes
+    for component in sorted(components, key=lambda c: (-sum(weights[n] for n in c), c)):
+
+        def cost(offset: int) -> tuple[float, float, int]:
+            trial = loads.copy()
+            for name in component:
+                trial[(ranks[name] + offset) % classes] += weights[name]
+            return max(trial), sum(v * v for v in trial), offset
+
+        offset = min(range(classes), key=cost)
+        for name in component:
+            ranks[name] = (ranks[name] + offset) % classes
+            loads[ranks[name]] += weights[name]

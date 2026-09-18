@@ -190,8 +190,9 @@ def assert_fk_arrows(schema, root):
         top = box["y"] + box["header"] * (row + 1)
         # ELK can align horizontal segments away from the row's center. The
         # endpoint must still lie strictly inside the correct SQL field row.
+        # Classic arrowheads can end exactly five units outside the table edge.
         return (
-            min(abs(point[0] - box["x"]), abs(point[0] - box["x"] - box["width"])) < 5
+            min(abs(point[0] - box["x"]), abs(point[0] - box["x"] - box["width"])) <= 5
             and top + 1 < point[1] < top + box["header"] - 1
         )
 

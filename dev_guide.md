@@ -140,7 +140,8 @@ The default `--grouping auto` also examines remaining connected components and t
 - A shared table linked to at least six neighbors across three or more groups, with fewer than half its neighbors in its assigned group, is placed separately. This avoids arbitrarily attaching a common identity/tenant table to one inferred domain.
 - Related tables are nested in invisible **regular D2 containers**. Native ELK routes both internal and cross-group edges. These connected groups never become separate grid cells, which would replace ELK routing with straight center-to-center segments.
 - Deterministic graph coloring orders adjacent tables and groups into a few layers. The D2 emitter uses both `child -> parent` and `parent <- child` so layout need not follow one long FK chain. Arrowheads still point from the referencing field to the referenced field; every FK, composite pair, column marker and tooltip is retained.
-- Singleton groups linked to at least three other groups are candidates for a central band, with neighboring groups arranged on both sides. Adjacent hubs receive distinct layers. Estimated group dimensions balance independent neighbors or layer classes; this guides ELK rather than fixing a node at an exact coordinate.
+- Singleton groups linked to at least three other groups are preferred candidates for a central band; when there are no singleton candidates, business groups can also be hubs. Adjacent hubs receive distinct layers. After removing the hubs, independent components can rotate their layer assignments to balance estimated sizes. Even one linked pair no longer forces all other neighbors onto the same side.
+- Inside a group, the planner compares ordinary layering with centering its most connected tables. It estimates dimensions using column counts, label widths, visible types and the selected direction, then scores area with a penalty for elongated shapes. It retains ordinary layering on ties or when centering would score worse. This performs no extra D2 renders and does not shrink fonts, hide fields or change group membership.
 
 This relationship-community stage uses declared or configured FKs; the separate business-family stage also uses names. Neither stage invents missing FKs. Large hubs, dense relationships and long labels can still create long routes; automatic grouping does not guarantee the best layout for every schema. ELK may enlarge heavily connected tables to make space for ports. Use existing `--fk-config` support when meaningful relationships are absent from SQL.
 
@@ -343,7 +344,7 @@ erd_generator/
   d2.py                # pure group/region orchestration and D2 source generation
   d2_emit.py           # SQL table, field, connection and container serialization
   d2_business.py       # name families, override resolution and fallback communities
-  d2_layout.py         # presentation components and estimated column packing
+  d2_layout.py         # size-aware table layers, components and column packing
   d2_grouping.py       # relationship communities, compact layers and shared hubs
   d2_styles.py         # native D2 palette, table and connection presets
   d2_renderer.py       # pinned D2/ELK execution and SVG publication
@@ -360,7 +361,7 @@ generated/            # ignored generated source, SVG and benchmark output
 docs/                 # business layout design and validation records
 ```
 
-SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business`, `d2_layout` and `d2_grouping` over shared Schema and normalized relationships, then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
+SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business` and `d2_layout` over shared Schema and normalized relationships; the size-aware layout planner depends on the graph operations in `d2_grouping`, never the reverse. Generation then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
 
 The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True, style="clean")` and never mutates its input; `style="classic"` preserves the original D2 output style.
 
