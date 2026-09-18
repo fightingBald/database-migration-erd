@@ -114,3 +114,26 @@ def test_no_eligible_hubs_keeps_existing_layering():
     names = ("a", "b", "c")
     pairs = (("a", "b"), ("b", "c"))
     assert centered_ranks(names, pairs, hubs=names) == layout_ranks(names, pairs)
+
+
+def test_business_hub_can_be_centered_without_an_explicit_singleton_candidate():
+    names = ("books", "branches", "loans", "members")
+    pairs = (("loans", "books"), ("loans", "branches"), ("loans", "members"))
+    ranks = centered_ranks(names, pairs)
+    assert min(ranks.values()) < ranks["loans"] < max(ranks.values())
+    assert all(ranks[a] != ranks[b] for a, b in pairs)
+
+
+def test_linked_outer_pair_does_not_push_all_independent_neighbors_to_one_side():
+    names = (*"abcdefg", "hub")
+    pairs = tuple((n, "hub") for n in "abcdef") + (("f", "g"),)
+    ranks = centered_ranks(names, pairs, hubs=("hub",))
+    left = sum(rank < ranks["hub"] for rank in ranks.values())
+    right = sum(rank > ranks["hub"] for rank in ranks.values())
+    assert abs(left - right) <= 1
+    assert all(ranks[a] != ranks[b] for a, b in pairs)
+    assert ranks == centered_ranks(
+        tuple(reversed(names)),
+        (*tuple((b, a) for a, b in reversed(pairs)), *pairs, ("hub", "hub")),
+        hubs=("hub",),
+    )

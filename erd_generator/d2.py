@@ -6,8 +6,8 @@ from hashlib import sha256
 from .d2_emit import container_lines, diagram_lines, relationship_lines
 from .d2_emit import quote_d2 as quote_d2
 from .d2_business import BusinessGroup, plan_groups
-from .d2_grouping import centered_ranks, group_tables, layout_ranks
-from .d2_layout import Component, estimate_size, plan_layout
+from .d2_grouping import centered_ranks, group_tables
+from .d2_layout import Component, estimate_size, plan_layout, table_ranks
 from .d2_styles import CLEAN_CONFIG, GRID_GAP, STYLES, GroupPalette, group_palette
 from .layout_config import LayoutConfig
 from .schema import Schema
@@ -62,10 +62,7 @@ def _component_lines(
     groups = tuple(g for g in groups if g.tables[0] in members)
     if len(groups) == 1 and not groups[0].label:
         ranks = (
-            layout_ranks(
-                component.tables,
-                tuple((f.table, f.ref_table) for f in component.relationships),
-            )
+            table_ranks(component, schema, show_types, direction)
             if inherited_palette and automatic
             else None
         )
@@ -135,12 +132,7 @@ def _component_lines(
                     inherited_palette=palette,
                 )
             ranks = (
-                layout_ranks(
-                    part.tables,
-                    tuple((f.table, f.ref_table) for f in part.relationships),
-                )
-                if automatic
-                else None
+                table_ranks(part, schema, show_types, direction) if automatic else None
             )
             return diagram_lines(
                 {n: schema[n] for n in part.tables},

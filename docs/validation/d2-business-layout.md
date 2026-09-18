@@ -1,16 +1,16 @@
 # Business layout validation
 
-Date: 2026-09-18. Local validation uses Python 3.14 and pinned D2 0.7.1 with bundled ELK. This record covers business layout and example sanitization, separately from the earlier [research prototypes](../plans/d2-business-layout.md#实测结果). Later backend-removal checks and current test counts are recorded in [D2-only validation](d2-elk.md).
+Date: 2026-09-18. Local validation uses Python 3.14 and pinned D2 0.7.1 with bundled ELK. This record covers business layout and example sanitization, separately from the earlier [research prototypes](../plans/d2-business-layout.md#实测结果). Backend-removal checks are recorded in [D2-only validation](d2-elk.md); the subsequent 30-table layout refinement and updated counts are recorded below.
 
 ## Implemented behavior
 
 - The existing `python -m erd_generator SQL_DIR OUTPUT` command infers business families from table-name word prefixes and FK evidence, then emits titles, stable colours and compact regions.
 - Optional `--layout-config PATH` overrides membership, titles and colours. Strict configuration failures preserve both existing outputs. Source-only generation works with no D2 executable on PATH.
 - Large business regions preserve internal relationship communities. Global FK metadata and qualified field paths survive nested groups; connected groups remain outside cross-cell grids.
-- Shared singleton hubs can occupy a central band between neighboring groups. Multiple hubs and uneven group sizes are covered.
+- Shared singleton hubs, or business groups when no singleton candidates exist, can occupy a central band. Independent neighbor components balance their layer assignments; table-level centering is selected by estimated area and proportions. Multiple hubs and uneven group sizes are covered.
 - `--grouping none` disables automatic business/community/hub layout. Explicit override groups remain active; removing the override flag as well restores ungrouped behavior.
 
-## Checks
+## Original business-layout checks
 
 | Check | Result |
 | --- | --- |
@@ -47,3 +47,23 @@ Route lengths are Manhattan-distance estimates through SVG route points/control 
 The checked-in `db/migration` sample and `sample_fk_config.yaml` also render successfully: **5 fictional library tables, 21 columns and 5 FKs**. The golden D2 fixture and local generated SVG were rebuilt from synthetic SQL; obsolete parser logs and local presentation artifacts were removed. Working-tree scans cover source, docs, fixtures, filenames and generated output, excluding Git metadata and dependency/cache directories. Git-history cleanup is a separate operation; this validation does not claim old commits were rewritten.
 
 These synthetic measurements do not establish a universal readability or performance guarantee. Dense graphs can retain long edges and crossings; D2 may enlarge highly connected SQL tables. Self references retain the existing explicit field labels and D2 0.7.1 table-boundary routing limitation. Acceptance uses synthetic schemas only; remote GitHub Actions/Docusaurus deployment was not run in this task.
+
+## 30-table layout refinement
+
+The same fictional [library SQL](../../tests/fixtures/library_30_tables.sql) was rendered before and after changing the planner. Both use default automatic grouping, visible types and clean styling, without layout YAML: **30 tables, 123 columns, 34 FKs**, including five cross-group FKs. Books and Members have eight tables each; Branches and Loans have seven each. Group membership, labels, field text, key markers and font styles are unchanged.
+
+| Measurement | Before | After |
+| --- | --- | --- |
+| Canvas | 3945 × 3158 | 3795 × 2532 |
+| Canvas area | 12,458,310 | 9,608,940 (**22.87% less**) |
+| Total routed-length estimate | 26,360.8 | 18,254.3 (**30.75% less**) |
+| Longest routed-length estimate | 4,134.3 | 2,135.0 (**48.36% less**) |
+| Table-area / canvas-area | 15.9% | 20.4% |
+
+Route estimates use the same SVG-point Manhattan measure described above. Loans is now between the other regions, while Branches distributes neighbors around its root. ELK no longer stretches the Branches root's rows from 36 to 48 units to accommodate one-sided ports; the font size is unchanged. Visual inspection confirms shorter cross-region connections, with substantial whitespace still remaining at the upper left. This is a measured improvement for this input, not a universal layout guarantee.
+
+The planner considers two table-layer candidates without running D2, retains the existing candidate on ties, and prefers estimated area and reasonable proportions over unconditional centering. It adds no dependency, CLI option, fixed coordinates or SVG postprocessing. `--grouping none` disables this automatic behavior; 24 source comparisons over three graphs, four directions and two styles remain byte-for-byte unchanged. To recover the exact previous automatic placement, revert the planner changes and regenerate; SQL and publication paths are unaffected.
+
+Validation: **318 fast tests** and **58 real D2/ELK integration tests** passed, including the new 30-table input in all four directions and both styles. Compilation, Ruff lint/format and diff whitespace checks passed. The eight new renders check every column, actual FK row endpoints and arrow direction, non-overlapping tables/regions, and deterministic source generation. Default clean/right output also has regression bounds for canvas area, total routes and longest route. Reproduce with `python -m pytest -q tests/integration/test_balanced_layout.py`.
+
+The new classic-style cases exposed an assertion boundary: a correctly placed arrow can stop exactly five SVG units outside a table edge. The endpoint helper now includes that boundary (`<= 5`); its strict check that the endpoint lies within the correct field row remains unchanged. This corrected the assertion, without changing the generated SVG or removing a check.

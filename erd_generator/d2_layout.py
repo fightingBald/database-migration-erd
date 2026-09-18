@@ -7,6 +7,7 @@ import math
 import unicodedata
 
 from .schema import Schema, Table
+from .d2_grouping import centered_ranks, layout_ranks
 from .d2_styles import COMPONENT_PADDING, GRID_GAP
 from .validation import Relationship
 
@@ -87,6 +88,53 @@ def _table_size(table: Table, show_types: bool) -> tuple[int, int]:
     )
     width = max(180, 20 + 11 * _text_width(table.name), 80 + 10 * (names + types))
     return width, 36 * (len(table.columns) + 1)
+
+
+def table_ranks(
+    component: Component, schema: Schema, show_types: bool, direction: str
+) -> dict[str, int]:
+    """Center dominant tables only when estimated area and proportions improve.
+
+    Compare two pure plans, without rendering or changing table dimensions. The
+    existing colouring wins ties; small/dense graphs need no additional layers.
+    """
+    names = component.tables
+    pairs = tuple((f.table, f.ref_table) for f in component.relationships)
+    original = layout_ranks(names, pairs)
+    neighbors = {n: set() for n in names}
+    for a, b in pairs:
+        if a != b:
+            neighbors[a].add(b)
+            neighbors[b].add(a)
+    degree = max(map(len, neighbors.values()), default=0)
+    if degree < 3:
+        return original
+    sizes = {n: _table_size(schema[n], show_types) for n in names}
+    main, cross = (0, 1) if direction in {"right", "left"} else (1, 0)
+    candidate = centered_ranks(
+        names,
+        pairs,
+        hubs=tuple(n for n in names if len(neighbors[n]) == degree),
+        weights={n: size[cross] for n, size in sizes.items()},
+    )
+    if candidate == original:
+        return original
+
+    def score(ranks: dict[str, int]) -> float:
+        layers: dict[int, list[tuple[int, int]]] = {}
+        for name in sorted(names):
+            layers.setdefault(ranks[name], []).append(sizes[name])
+        length = sum(max(s[main] for s in layer) for layer in layers.values())
+        length += 70 * (len(layers) - 1)
+        breadth = max(
+            sum(s[cross] for s in layer) + 20 * (len(layer) - 1)
+            for layer in layers.values()
+        )
+        # Penalize strips beyond the same preferred aspect used by packing.
+        # This is a heuristic, not an ELK coordinate or canvas-ratio guarantee.
+        return max(length * breadth, max(length, breadth) ** 2 / TARGET_ASPECT)
+
+    return candidate if score(candidate) < score(original) else original
 
 
 def _component_size(

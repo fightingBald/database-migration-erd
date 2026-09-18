@@ -1,5 +1,9 @@
 from copy import deepcopy
 
+import pytest
+
+from erd_generator import d2_layout
+from erd_generator.d2_grouping import layout_ranks
 from erd_generator.d2_layout import connected_components, plan_layout
 from erd_generator.schema import Column, ForeignKey, Table
 from erd_generator.validation import validate_schema
@@ -77,3 +81,51 @@ def test_business_membership_joins_disconnected_parts_without_inventing_edges():
     blocks = [block for column in layout for block in column]
     assert sorted(block.tables for block in blocks) == [("a", "b", "c", "d"), ("e",)]
     assert tuple(f for block in blocks for f in block.relationships) == edges
+
+
+@pytest.mark.parametrize("direction", ["right", "left", "up", "down"])
+def test_table_layers_balance_a_star_without_mutating_schema(direction):
+    schema = {
+        name: Table(name, columns=[Column("id", "INT"), Column("root", "INT")])
+        for name in ("hub", *(f"detail_{i}" for i in range(6)))
+    }
+    for name, value in schema.items():
+        if name != "hub":
+            value.foreign_keys = [ForeignKey(("root",), "hub", ("id",))]
+    edges = validate_schema(schema).relationships
+    part = d2_layout.Component(tuple(schema), edges)
+    before = deepcopy(schema)
+    ranks = d2_layout.table_ranks(part, schema, True, direction)
+    assert sum(r < ranks["hub"] for r in ranks.values()) == 3
+    assert sum(r > ranks["hub"] for r in ranks.values()) == 3
+    assert ranks == d2_layout.table_ranks(
+        d2_layout.Component(tuple(reversed(part.tables)), tuple(reversed(edges))),
+        dict(reversed(list(schema.items()))),
+        True,
+        direction,
+    )
+    assert schema == before
+
+
+@pytest.mark.parametrize("count", [0, 1, 6])
+def test_table_layers_leave_unconnected_tables_alone(count):
+    schema = {f"t{i}": Table(f"t{i}") for i in range(count)}
+    ranks = d2_layout.table_ranks(
+        d2_layout.Component(tuple(schema), ()), schema, False, "right"
+    )
+    assert ranks == layout_ranks(tuple(schema), ())
+
+
+def test_table_layers_keep_existing_layout_when_a_tall_hub_would_only_add_width():
+    schema = {
+        n: Table(n, columns=[Column(f"f{i}", "TEXT") for i in range(fields)])
+        for n, fields in (("hub", 40), *((f"t{i}", 2) for i in range(6)))
+    }
+    for name, value in schema.items():
+        if name != "hub":
+            value.foreign_keys = [ForeignKey(("f0",), "hub", ("f0",))]
+    edges = validate_schema(schema).relationships
+    part = d2_layout.Component(tuple(schema), edges)
+    assert d2_layout.table_ranks(part, schema, True, "right") == layout_ranks(
+        tuple(schema), tuple((f.table, f.ref_table) for f in edges)
+    )
