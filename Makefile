@@ -7,7 +7,7 @@ DIAGRAM_ARGS = --migrations "$(MIGRATIONS)" --out "$(SOURCE)" --show-types --sty
 
 .PHONY: build gen run test test-integration lint format benchmark
 build:
-	$(PYTHON) -m compileall -q erd_generator scripts gen_drawio_erd_table.py parse_drawio_edges.py compare_drawio_to_migrations.py
+	$(PYTHON) -m compileall -q erd_generator scripts
 
 gen:
 	$(PYTHON) -m erd_generator $(DIAGRAM_ARGS)

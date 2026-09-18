@@ -7,7 +7,6 @@ from typing import Any
 
 __all__ = [
     "main",
-    "build_drawio",
     "build_d2",
     "load_schema_from_migrations",
     "get_last_parse_failures",
@@ -18,8 +17,6 @@ __all__ = [
 def __getattr__(name: str) -> Any:  # pragma: no cover - thin lazy loader
     if name == "main":
         return import_module("erd_generator.cli").main
-    if name == "build_drawio":
-        return import_module("erd_generator.drawio").build_drawio
     if name == "build_d2":
         return import_module("erd_generator.d2").build_d2
     if name == "load_schema_from_migrations":

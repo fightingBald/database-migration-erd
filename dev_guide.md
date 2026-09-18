@@ -1,12 +1,12 @@
 # Developer guide
 
-CLI reference, schema behavior, compatibility tools and contributor workflows. For installation and everyday use, see the [README](README.md).
+CLI reference, schema behavior and contributor workflows. For installation and everyday use, see the [README](README.md).
 
 ## Environment
 
 Use Python **3.11+** and **D2 0.7.1**. Local validation used Python 3.14; CI is configured for 3.11 and 3.14. Rendering checks the exact D2 version to keep layout behavior reproducible; both `0.7.1` and `v0.7.1` version strings are accepted.
 
-Download D2 from the [official 0.7.1 release](https://github.com/d2lang/d2/releases/tag/v0.7.1). ELK is included; no separate ELK service is needed. `requirements.txt` installs runtime dependencies; `requirements-dev.txt` also installs pytest and Ruff. The original dependency installation surface still includes NetworkX/pydot for draw.io compatibility, but the D2 path does not import them.
+Download D2 from the [official 0.7.1 release](https://github.com/d2lang/d2/releases/tag/v0.7.1). ELK is included; no separate ELK service is needed. `requirements.txt` installs only sqlglot and PyYAML; `requirements-dev.txt` also installs pytest and Ruff.
 
 ## CLI reference
 
@@ -40,7 +40,6 @@ Quote paths containing spaces. Generated files are overwritten by regeneration; 
 | `--show-types` | Explicitly display SQL column types; already enabled for the short command |
 | `--fk-config PATH` | Add relationships declared in YAML |
 | `--layout-config PATH` | Optional business-group, title and colour overrides; see [business layout](#business-layout) |
-| `--layout elk` | D2 always uses ELK; normally omitted |
 | `--direction right\|left\|up\|down` | ELK layout direction, default `right`; after grouping, FK arrows can point either way while retaining their actual meaning |
 | `--grouping auto\|none` | Infer business/relationship groups and balance shared hubs, default `auto`; `none` disables those inferences while retaining explicit layout groups and independent component packing |
 | `--d2-binary PATH` | Rendering executable, default `d2`; requires SVG output |
@@ -56,7 +55,9 @@ Existing named commands remain supported, including `--render svg` with a `.d2` 
 python -m erd_generator --migrations ./db/migration --out ./generated/schema.d2 --show-types --render svg
 ```
 
-Use either the two positional paths or `--migrations` plus `--out`; mixing them is rejected. Named commands retain their previous defaults: column types are hidden unless `--show-types` is supplied, and a `.d2` output does not render unless `--render svg` is supplied. Named `--out` also accepts `.svg`. To roll back to the previous invocation style, keep using the named command; existing scripts and Makefile targets continue to work. The positional form is for D2; explicit draw.io commands are documented below.
+Use either the two positional paths or `--migrations` plus `--out`; mixing them is rejected. With named paths, column types are hidden unless `--show-types` is supplied, and a `.d2` output does not render unless `--render svg` is supplied. Named `--out` also accepts `.svg`. CLI and Python `erd_generator.main()` use the same D2-only workflow.
+
+Breaking change: draw.io export, XML extraction/comparison, their scripts and Python export have been removed. `--format`, `--layout`, `--per-row` and `--graphviz-*` are no longer accepted; ELK is fixed. Switch old invocations to `python -m erd_generator SQL_DIR OUTPUT`. There are no compatibility aliases. To restore the removed functionality, restore the previous project version and its dependencies; no database rollback is involved.
 
 ## Table and relationship behavior
 
@@ -69,11 +70,11 @@ Use either the two positional paths or `--migrations` plus `--out`; mixing them 
 - Primary keys, complete foreign keys and indexes (including available names, methods and predicates) appear in table tooltips. `--force-appendix` makes the notes visible without hovering.
 - Self references have explicit `source_column → target_column` labels: D2 0.7.1/ELK may route self loops to table boundaries rather than exact row ports. The project renderer sets `--elk-nodeSelfLoop=100` to leave room for these labels.
 
-This replaces draw.io's fixed note blocks beneath each table with tooltips/appendices. D2 handles text quoting, including reserved keywords, dots, quotes, backslashes, Unicode and literal `${...}` sequences.
+D2 handles text quoting, including reserved keywords, dots, quotes, backslashes, Unicode and literal `${...}` sequences.
 
 See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lang.com/tour/elk/) for the upstream rendering model.
 
-Use `--style classic` to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. `--style` applies only to D2. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
+Use `--style classic` to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
 
 ### Compact placement
 
@@ -83,7 +84,7 @@ Disconnected tables and independent relationship groups are packed automatically
 - Within each region, native ELK places and routes connected business groups and relationship communities. Tables without enough naming or relationship evidence retain their previous flat D2 structure.
 - For multiple groups, a pure planner estimates their sizes from names, column counts/types and relationship layers. It compares column counts, balancing the overall aspect ratio and unused area, and places taller groups first to balance column heights.
 - Invisible D2 containers separate the outer grid from each group's ELK layout. Tables retain their natural dimensions and font sizes; putting SQL tables directly into a grid would stretch rows/widths, and putting FK endpoints directly in separate grid cells would lose ELK routing. See [D2 grid behavior](https://d2lang.com/tour/grid-diagrams/).
-- The renderer uses 16-unit ELK container padding; grids use 48-unit gaps. Sorting and tie-breaking are deterministic. `.d2` generation still needs no D2 executable, and layout planning does not mutate Schema or depend on draw.io/NetworkX.
+- The renderer uses 16-unit ELK container padding; grids use 48-unit gaps. Sorting and tie-breaking are deterministic. `.d2` generation needs no D2 executable, and layout planning uses only the standard library without mutating Schema.
 
 Size estimates guide packing; they are not a guaranteed canvas ratio. A single large connected graph, exceptionally long labels or one very tall table can still make a wide/tall diagram. A connected graph is not split into grid cells just to meet an aspect ratio. `--direction` controls the ELK layout axis, and `--style classic` changes appearance while keeping automatic packing.
 
@@ -145,7 +146,7 @@ This relationship-community stage uses declared or configured FKs; the separate 
 
 No additional runtime dependency or D2 executable is needed for source generation. The planner is deterministic and does not modify Schema. Validation checks rendered table regions, FK field rows and actual SVG arrowheads, not just D2 strings. A 40-table / 71-FK regression fixture also compares canvas area and routed lengths against `--grouping none`.
 
-Migration/rollback: grouped D2 adds `_erd_group_*` object-path prefixes and may use `<-` as well as `->`. Tools reading generated D2 must account for both connection directions. Add `--grouping none` (or `build_d2(..., grouping="none")`) and regenerate to restore the previous connected-graph layout. Disconnected component packing, SQL processing and draw.io behavior are unaffected; no database rollback is involved.
+Migration/rollback: grouped D2 adds `_erd_group_*` object-path prefixes and may use `<-` as well as `->`. Tools reading generated D2 must account for both connection directions. Add `--grouping none` (or `build_d2(..., grouping="none")`) and regenerate to restore the previous connected-graph layout. Disconnected component packing and SQL processing are unaffected; no database rollback is involved.
 
 The [business layout design](docs/plans/d2-business-layout.md) records the engine constraints and prototype comparisons. [Implementation validation](docs/validation/d2-business-layout.md) records the current checks separately from those prototypes.
 
@@ -171,7 +172,7 @@ demo_library.loan_items:
 
 Each triple is `[local_column, target_table, target_column]`. Composite relationships use `[[tenant_id, user_id], memberships, [tenant_id, id]]`. The historical two-item YAML shorthand `[id, target_table]` means the same column name on both sides.
 
-In the D2 path, a short table name must resolve unambiguously. Wrong qualified names, unknown columns and malformed entries fail generation; use explicit qualified names when schemas share table names. YAML adds relationships and does not replace conflicting SQL declarations.
+A short table name must resolve unambiguously. Wrong qualified names, unknown columns and malformed entries fail generation; use explicit qualified names when schemas share table names. YAML adds relationships and does not replace conflicting SQL declarations.
 
 SQL `REFERENCES table` without column names is supported when the target has a single primary-key column. Omitted composite references fail clearly because the existing Schema stores primary keys as an unordered set; it cannot safely infer the declaration order. Explicit composite reference columns are supported.
 
@@ -318,38 +319,6 @@ The command creates both `schema.svg` and `schema.d2`; the output directory is c
 
 Before enabling deployment, verify a clean checkout builds successfully, a schema change appears in the SVG, the diagram opens under the deployed `baseUrl`, and a generation failure prevents the site build/deployment. The repository's real-rendering tests cover SVG generation; the consuming site owns its build and deployment checks.
 
-## draw.io compatibility and rollback
-
-The existing command retains draw.io as its default:
-
-```bash
-.venv/bin/python gen_drawio_erd_table.py \
-  --migrations ./db/migration \
-  --out ./generated/schema.drawio \
-  --show-types --layout grid \
-  --fk-config sample_fk_config.yaml
-```
-
-The new command can also select it explicitly:
-
-```bash
-.venv/bin/python -m erd_generator --format drawio \
-  --migrations ./db/migration --out ./generated/schema.drawio
-```
-
-`--per-row`, `--graphviz-prog`, `--graphviz-scale` and `--graphviz-spacing` apply only to draw.io. Graphviz requires a system `dot` binary and a working NetworkX Graphviz adapter. Its historical fallback to grid is retained; it does not apply to D2.
-
-Existing tools remain usable:
-
-```bash
-.venv/bin/python parse_drawio_edges.py generated/schema.drawio > recovered_fks.yaml
-.venv/bin/python compare_drawio_to_migrations.py db/migration generated/schema.drawio --out schema_diff.txt
-```
-
-The extractor reports unmapped endpoints and writes a companion anomaly log. The comparator reports differences in tables, columns, FK notes and index notes; `--debug` prints additional parsed metadata. It compares native migrations without YAML additions, so YAML-only relationships are expected differences. It is a legacy report command, not a D2 validator or a nonzero-exit CI difference gate.
-
-Rollback of the default workflow consists of explicitly invoking the old command and using its `.drawio` output. Existing `erd_generator.main()`, `build_parser()` and `build_drawio()` retain their default backend/API behavior. Parser correctness fixes apply to both backends. No database migration or deployment rollback is needed.
-
 ## Repository structure
 
 ```text
@@ -378,14 +347,9 @@ erd_generator/
   d2_grouping.py       # relationship communities, compact layers and shared hubs
   d2_styles.py         # native D2 palette, table and connection presets
   d2_renderer.py       # pinned D2/ELK execution and SVG publication
-  drawio.py            # retained draw.io exporter
-  layout.py            # draw.io-only grid/Graphviz placement
-  drawio_parser.py     # retained XML reader
-  schema_diff.py       # retained draw.io comparison
   test_*.py            # unit tests close to implementation
 tests/
   test_cli.py          # subprocess CLI and import-boundary tests
-  test_legacy_tools.py # extraction/comparison compatibility
   integration/        # real pinned D2 rendering; missing D2 is a failure
   fixtures/           # explicit small SQL/D2 expectations
 scripts/              # reproducible synthetic rendering benchmark
@@ -393,7 +357,7 @@ db/migration/         # sample SQL migrations
 sample_fk_config.yaml # sample additional relationships
 generated/            # ignored generated source, SVG and benchmark output
 .github/workflows/    # build/test/lint and real ELK checks
-docs/                 # migration design and local validation record
+docs/                 # business layout design and validation records
 ```
 
 SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business`, `d2_layout` and `d2_grouping` over shared Schema and normalized relationships, then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
@@ -404,7 +368,7 @@ The new explicit loading API is `erd_generator.sql_parser.load_schema_result(pat
 
 ```bash
 python -m pip install -r requirements-dev.txt
-python -m compileall -q erd_generator scripts gen_drawio_erd_table.py parse_drawio_edges.py compare_drawio_to_migrations.py
+python -m compileall -q erd_generator scripts
 python -m pytest -q -m 'not integration'
 python -m ruff check .
 python -m ruff format --check .
@@ -418,7 +382,7 @@ The `not integration` marker runs fast tests without requiring D2. The `integrat
 
 The benchmark script separately renders deterministic 50- and 200-table synthetic inputs. Each case writes source, SVG and `metrics.json` under `generated/benchmark-N/`, including duration, peak child-process RSS, output bytes and dimensions. These measurements do not predict every production graph's readability or runtime.
 
-CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command. [Migration design](docs/plans/d2-elk-migration.md) describes boundaries and rollback stages; [local validation](docs/validation/d2-elk.md) records measured results and remaining limits.
+CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command. [Local validation](docs/validation/d2-elk.md) records D2-only checks and remaining limits; [business layout design](docs/plans/d2-business-layout.md) describes layout boundaries and rollback options.
 
 ## Supported SQL and limitations
 

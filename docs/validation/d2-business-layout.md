@@ -1,6 +1,6 @@
 # Business layout validation
 
-Date: 2026-09-18. Local validation uses Python 3.14 and pinned D2 0.7.1 with bundled ELK. This record covers the implemented generator, separately from the earlier [research prototypes](../plans/d2-business-layout.md#实测结果).
+Date: 2026-09-18. Local validation uses Python 3.14 and pinned D2 0.7.1 with bundled ELK. This record covers business layout and example sanitization, separately from the earlier [research prototypes](../plans/d2-business-layout.md#实测结果). Later backend-removal checks and current test counts are recorded in [D2-only validation](d2-elk.md).
 
 ## Implemented behavior
 
@@ -14,7 +14,7 @@ Date: 2026-09-18. Local validation uses Python 3.14 and pinned D2 0.7.1 with bun
 
 | Check | Result |
 | --- | --- |
-| `python -m compileall -q erd_generator scripts gen_drawio_erd_table.py parse_drawio_edges.py compare_drawio_to_migrations.py` | Passed |
+| `python -m compileall -q erd_generator scripts` | Passed |
 | `python -m pytest -q -m 'not integration'` | **315 passed in 12.18 s** after replacing example data |
 | `python -m pytest -q -m integration` | **50 passed in 147.94 s**, all using actual D2/ELK rendering |
 | `python -m ruff check .` | Passed |

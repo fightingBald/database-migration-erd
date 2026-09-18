@@ -1,4 +1,4 @@
-"""Load YAML relationships; strict resolution is opt-in for the new D2 path."""
+"""Load YAML relationships and require valid, unambiguous table/column targets."""
 
 from __future__ import annotations
 
@@ -155,37 +155,35 @@ class _SchemaLookup:
     def __init__(self, schema: Schema) -> None:
         self.schema = schema
 
-    def resolve(self, identifier: str, *, strict: bool) -> Table | None:
+    def resolve(self, identifier: str) -> Table | None:
         # Exact spelling wins for quoted SQL names, before case-insensitive matching.
         if identifier in self.schema:
             return self.schema[identifier]
         matches = [
             t for name, t in self.schema.items() if name.lower() == identifier.lower()
         ]
-        if not matches and (not strict or "." not in identifier):
+        if not matches and "." not in identifier:
             suffix = identifier.rsplit(".", 1)[-1].lower()
             matches = [
                 t
                 for name, t in self.schema.items()
                 if name.rsplit(".", 1)[-1].lower() == suffix
             ]
-        if strict and len(matches) > 1:
+        if len(matches) > 1:
             raise ValueError(
                 f"ambiguous table '{identifier}'; use an exact qualified name"
             )
         return matches[0] if matches else None
 
 
-def _resolve_columns(
-    table: Table, columns: Iterable[str], *, strict: bool
-) -> tuple[str, ...]:
+def _resolve_columns(table: Table, columns: Iterable[str]) -> tuple[str, ...]:
     resolved = []
     for name in columns:
         exact = [c for c in table.columns if c.name == name]
         matches = exact or [c for c in table.columns if c.name.lower() == name.lower()]
-        if strict and len(matches) != 1:
+        if len(matches) != 1:
             raise ValueError(f"unknown or ambiguous column '{table.name}.{name}'")
-        resolved.append(matches[0].name if matches else name)
+        resolved.append(matches[0].name)
     return tuple(resolved)
 
 
@@ -195,30 +193,19 @@ def apply_foreign_key_config(
     *,
     config_source: str | None = None,
     failures: list[ParseFailure] | None = None,
-    strict: bool = False,
 ) -> None:
     lookup = _SchemaLookup(schema)
     for entry in entries:
         try:
-            table = lookup.resolve(entry.normalized_table, strict=strict)
+            table = lookup.resolve(entry.normalized_table)
             if not table:
                 raise ValueError(f"unknown source table '{entry.table_key}'")
-            target = lookup.resolve(entry.normalized_reference_table, strict=strict)
-            if strict and not target:
-                raise ValueError(f"unknown target table '{entry.reference_table_key}'")
+            target = lookup.resolve(entry.normalized_reference_table)
             if not target:
-                _record(
-                    failures,
-                    config_source,
-                    f"unknown target table '{entry.reference_table_key}'",
-                )
-            local = _resolve_columns(table, entry.local_columns, strict=strict)
-            remote = (
-                _resolve_columns(target, entry.reference_columns, strict=strict)
-                if target
-                else entry.reference_columns
-            )
-            target_name = target.name if target else entry.normalized_reference_table
+                raise ValueError(f"unknown target table '{entry.reference_table_key}'")
+            local = _resolve_columns(table, entry.local_columns)
+            remote = _resolve_columns(target, entry.reference_columns)
+            target_name = target.name
             if any(
                 fk.columns == local
                 and fk.ref_table == target_name

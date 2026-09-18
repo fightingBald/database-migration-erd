@@ -1,6 +1,6 @@
-"""The primary module entrypoint generates D2 by default."""
+"""Generate D2 source and SVG diagrams from migration SQL."""
 
 from .cli import main
 
 if __name__ == "__main__":
-    raise SystemExit(main(default_format="d2"))
+    raise SystemExit(main())

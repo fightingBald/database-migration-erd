@@ -13,7 +13,7 @@ def test_schema_import_does_not_load_rendering_dependencies():
             "-c",
             "import sys; import erd_generator.schema; "
             "assert not any(m in sys.modules for m in "
-            "('erd_generator.cli', 'erd_generator.drawio', 'erd_generator.layout', 'networkx'))",
+            "('erd_generator.cli', 'erd_generator.d2', 'erd_generator.d2_renderer'))",
         ],
         capture_output=True,
         text=True,

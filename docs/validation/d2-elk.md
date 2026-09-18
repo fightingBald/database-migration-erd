@@ -1,66 +1,42 @@
-# D2 + ELK local validation
+# D2 + ELK validation
 
-Date: 2026-09-10. The results below record local implementation checks.
+Date: 2026-09-18. This record covers the D2-only generator after removing the former backend and its compatibility tools. Business-layout measurements and earlier test counts are recorded separately in [business layout validation](d2-business-layout.md).
 
-## Implemented
+## Scope
 
-- `python -m erd_generator` defaults to D2; `make run` generates D2 source and an ELK SVG.
-- Old draw.io entrypoints and Python exports remain available. D2 does not import NetworkX or the draw.io layout/exporter.
-- SQL/FK loading returns per-run diagnostics; the historical last-run API remains available separately.
-- D2 source generation validates relationships, quotes data, sorts output deterministically and leaves the input Schema unchanged.
-- D2 defaults to a clean blue-grey style with light row separators, teal key markers and muted connections; `--style classic` restores the original appearance. Native palette/settings are embedded in the source.
-- Rendering requires D2 0.7.1/bundled ELK, bounds execution time and publishes only a verified SVG. Failed rendering preserves the previous SVG and returns nonzero.
-- D2 self references include field labels. The renderer uses self-loop spacing 100; this improves simple loops but does not prevent all composite-loop label collisions.
-- DROP table/column/constraint/index compatibility, schema-qualified index operations, DROP COLUMN CASCADE, complete removal of affected primary-key constraints, numeric migration ordering, ambiguous YAML references and detected parse-error line reporting have regression coverage.
-- The legacy comparator now understands qualified FK targets and generated type-suffixed column labels.
-- README, Makefile, pinned Python dependencies and GitHub Actions checks are included.
-- Stale unique-constraint registration after DROP COLUMN is fixed and covered for single/composite constraints.
-- Version preflight accepts the pinned release as either `0.7.1` or `v0.7.1`, covering the Linux release binary; other versions and development suffixes remain rejected.
+The only generation path is `SQL + optional YAML -> validated Schema -> D2 -> ELK -> SVG`. Both `python -m erd_generator` and Python `erd_generator.main()` use it. A `.d2` output needs no renderer; a `.svg` output also writes same-stem D2 source.
 
-## Verification results
+Backend selection and old layout switches are removed, with no aliases or fallback. Invalid options fail before replacing either output. YAML FK resolution always rejects ambiguous tables, wrong qualified names, missing targets and unknown columns. Detected SQL/configuration failures stop generation; render failures retain the prior SVG and report the retained source.
 
-Environment: macOS, Python 3.14.0, sqlglot 30.18.0, NetworkX 3.6.1, PyYAML 6.0.3, pydot 4.0.1, D2 0.7.1 with bundled ELK.
+## Environment and checks
+
+A new isolated virtual environment was created from `requirements-dev.txt`, without system site packages. Runtime dependencies are sqlglot 30.18.0 and PyYAML 6.0.3; tests use pytest 9.1.1 and Ruff 0.16.6. Removed graph packages are absent from that environment. Rendering uses D2 0.7.1 with bundled ELK on macOS/Python 3.14.
 
 | Check | Result |
 | --- | --- |
-| `make build` | Pass |
-| `make test` | 117 passed; 6 integration tests deselected by design |
-| `make test-integration` | 6 passed; D2 is required, not silently skipped |
-| `make lint` | Ruff checks and scoped formatting pass |
-| `make run` | D2 + SVG generated successfully; last measured render 0.605 s |
-| Sample schema | 5 tables, 21 columns, 5 FKs, 7 index/unique records |
-| Legacy tools | draw.io export, relationship extraction, comparator and documented Graphviz fallback exercised |
-| Browser inspection | Sample table/column labels, ordinary FK row connections, labeled self-loop, composite FK pair labels and cyclic connections inspected in Chrome |
-| CI configuration | YAML structure checked; official Linux D2 archive downloaded and its SHA-256 verified |
+| CLI, YAML FK and loader tests | 79 passed after the targeted changes |
+| Full suite in the fresh environment | **358 passed in 157.27 s**: 308 fast tests and 50 actual D2/ELK rendering tests |
+| `python -m compileall -q erd_generator scripts` | Passed |
+| `python -m pip check` | No broken requirements |
+| Ruff lint and formatting | Passed |
+| Sample CLI with optional FK YAML | D2 and SVG generated successfully; 5 tables, 21 columns and 5 FKs |
+| Removed imports and command options | Old modules/export unavailable; old backend options absent from help |
+| Documentation links and `git diff --check` | Passed |
 
-Test coverage includes malformed SQL and YAML, source/target references, explicit/implicit composite FK boundaries, source immutability, deterministic ordering, reserved D2 words, literal substitutions, Unicode, executable/version/layout failures, timeouts, invalid SVGs, write failures and preservation of existing artifacts.
+The entrypoint regression compares the Python-call and module-command outputs. Removed options are checked for an error and preservation of existing source/SVG. Rendering checks cover real field endpoints, composite FKs, cycles, self references, quoted/Unicode identifiers, both styles, automatic business groups, shared hubs, disconnected packing and deterministic output.
 
-The tiny D2 golden fixture was written from explicit expected schema behavior. Schema correctness tests assert migration outcomes instead of merely comparing two renderers that share the same parser.
+## Sample workflow
 
-Both visual presets compile with the pinned D2 renderer. The classic preset still matches the original golden source, and the clean preset verifies actual SVG header/text/key/connection colours. Unicode and reserved/literal identifiers are rendered with both presets and the appendix. Style selection is rejected for draw.io. Column definitions and relationship endpoints are checked for equivalence, and generation leaves the Schema unchanged.
+```bash
+python -m erd_generator ./db/migration ./generated/schema.svg --fk-config ./sample_fk_config.yaml
+```
 
-Tables retain square corners: during styling validation, D2 0.7.1 produced invalid SVG for rounded SQL tables with quoted qualified names. Native rounding is applied only to connections.
+The fictional library migrations plus YAML describe **5 tables, 21 columns, 5 FKs and 7 index/unique records**. Tests assert the final migration semantics, including removal of dropped objects. The golden D2 fixture is regenerated from synthetic SQL and checked with the actual renderer.
 
-## Synthetic scale measurements
+## Remaining limits
 
-Reproduction: `make benchmark`. Each case runs in a fresh Python process and writes its SQL, D2, SVG and `metrics.json` beneath `generated/benchmark-N/`.
-
-The graph contains a long parent chain plus owner links. These are synthetic stress inputs, not a sample of the team's production schema. Elapsed time includes the Python CLI, D2 preflight and rendering. RSS is the peak child-process value reported by the OS, converted to MiB; it is not an aggregate concurrent-memory measurement.
-
-| Tables | Columns | FKs | Elapsed | Peak child RSS | SVG bytes | ViewBox width × height |
-| --- | --- | --- | --- | --- | --- | --- |
-| 50 | 298 | 98 | 6.655 s | 273.9 MiB | 293,056 | 19,439 × 4,486 |
-| 200 | 1,198 | 398 | 90.613 s | 1,914.9 MiB | 1,146,540 | 77,089 × 14,814 |
-
-Both completed within the default rendering timeout, but the 200-table case is expensive and visually wide. The measurements do not justify a fast-large-diagram claim. Domain filtering/grouping remains a follow-up once the team's actual schema and diagram boundaries are available.
-
-## Limits and remaining external verification
-
-- GitHub Actions targets Ubuntu/Python 3.11 and 3.14. The counts above are local results; consult the corresponding commit's Actions run for remote status. Windows has not been validated.
-- The team's actual migration history has not been supplied or run. The parser remains a documented PostgreSQL subset; no database was used to certify arbitrary SQL execution semantics.
-- D2 0.7.1/ELK may anchor a self loop to the table boundary despite column endpoints in the source. Field labels make the relationship explicit, but dense composite self-loop labels can still overlap; ordinary row-level connections were visually verified.
-- Omitted composite reference columns are rejected rather than inferred from an unordered primary-key set.
-- SVG/browser output is the supported rendered format. PNG/PDF and automatic business-domain splitting are not part of this implementation.
-- Source and SVG replacement are separate operations. Consumers must check the exit code before publishing either artifact.
-
-The Linux archive checksum used in CI is `eb172adf59f38d1e5a70ab177591356754ffaf9bebb84e0ca8b767dfb421dad7`, confirmed against the [official D2 0.7.1 release](https://github.com/d2lang/d2/releases/tag/v0.7.1) metadata and the downloaded bytes.
+- Local checks do not establish a remote GitHub Actions or Docusaurus deployment result. CI is configured for Ubuntu/Python 3.11 and 3.14; Windows is not validated here.
+- The parser supports a documented PostgreSQL subset and never executes SQL or connects to a database.
+- D2 0.7.1 can route self references to table boundaries; explicit field labels remain. Dense graphs can retain crossings and long lines.
+- SQL tables keep square corners because rounded quoted table names can produce invalid SVG in the pinned D2 release.
+- Source and SVG replacement are separate operations. Publication must require a successful CLI exit.
