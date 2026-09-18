@@ -1,4 +1,0 @@
-Parse failures collected at 2025-10-11T21:49:27.266041
-
-./db/migration/V3__evolve_users.sql
-  Parsed via generic command handler: ALTER TABLE public.users RENAME CONSTRAINT users_email_unique TO users_email_unq

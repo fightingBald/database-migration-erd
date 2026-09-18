@@ -6,11 +6,11 @@ vars: {
 }
 direction: right
 
-"public.users": {
+"demo_library.members": {
   shape: sql_table
   "id": "INT" {constraint: primary_key}
-  "manager_id": "INT" {constraint: foreign_key}
-  tooltip: "PK: (id)\nFK: (manager_id) -> public.users (id)"
+  "sponsor_id": "INT" {constraint: foreign_key}
+  tooltip: "PK: (id)\nFK: (sponsor_id) -> demo_library.members (id)"
 }
 
-"public.users"."manager_id" -> "public.users"."id": "manager_id → id"
+"demo_library.members"."sponsor_id" -> "demo_library.members"."id": "sponsor_id → id"

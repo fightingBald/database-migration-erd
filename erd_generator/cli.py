@@ -104,6 +104,16 @@ def build_parser(*, default_format: str = "drawio") -> argparse.ArgumentParser:
         help="D2 diagram direction (default: right)",
     )
     d2.add_argument(
+        "--grouping",
+        choices=["auto", "none"],
+        help="Infer business and relationship groups (default: auto)",
+    )
+    d2.add_argument(
+        "--layout-config",
+        metavar="PATH",
+        help="Optional YAML overrides for business groups, titles and colours",
+    )
+    d2.add_argument(
         "--render", choices=["svg"], help="Also render a same-stem SVG with ELK"
     )
     d2.add_argument("--d2-binary", help="D2 executable (render only; default: d2)")
@@ -192,6 +202,8 @@ def _validate_options(args: argparse.Namespace) -> None:
             raise ValueError("draw.io supports only grid or graphviz layouts")
         if (
             args.style is not None
+            or args.grouping is not None
+            or args.layout_config is not None
             or args.direction
             or args.render
             or args.d2_binary is not None
@@ -199,7 +211,7 @@ def _validate_options(args: argparse.Namespace) -> None:
             or args.force_appendix
         ):
             raise ValueError(
-                "D2 style/direction/rendering options are not applicable to draw.io"
+                "D2 style/grouping/layout-config/direction/rendering options are not applicable to draw.io"
             )
         for name in ("graphviz_scale", "graphviz_spacing"):
             value = getattr(args, name)
@@ -284,6 +296,13 @@ def run_cli(args: argparse.Namespace) -> int:
         output = Path(args.out).expanduser().resolve()
         if args.format == "d2":
             from .d2 import build_d2
+            from .layout_config import load_layout_config
+
+            layout_config = (
+                load_layout_config(args.layout_config)
+                if args.layout_config is not None
+                else None
+            )
 
             source_output = (
                 output.with_suffix(".d2") if output.suffix.lower() == ".svg" else output
@@ -298,6 +317,13 @@ def run_cli(args: argparse.Namespace) -> int:
                 show_types=args.show_types,
                 direction=args.direction or "right",
                 style=args.style or "clean",
+                grouping=args.grouping or "auto",
+                layout_config=layout_config,
+            )
+            LOGGER.info(
+                "D2 layout: grouping=%s layout_overrides=%d",
+                args.grouping or "auto",
+                len(layout_config.groups) if layout_config else 0,
             )
             _write_source(source_output, source)
             written_source = source_output

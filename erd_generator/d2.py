@@ -1,160 +1,201 @@
 """Pure D2 SQL-table source generation with ELK and component packing."""
 
-from .d2_layout import plan_layout
-from .d2_styles import CLEAN_CONFIG, CLEAN_CONNECTION, CLEAN_TABLE, GRID_GAP, STYLES
-from .schema import Schema, Table
-from .validation import Relationship, primary_columns, validate_schema
+from collections.abc import Callable
+from hashlib import sha256
+
+from .d2_emit import container_lines, diagram_lines, relationship_lines
+from .d2_emit import quote_d2 as quote_d2
+from .d2_business import BusinessGroup, plan_groups
+from .d2_grouping import centered_ranks, group_tables, layout_ranks
+from .d2_layout import Component, estimate_size, plan_layout
+from .d2_styles import CLEAN_CONFIG, GRID_GAP, STYLES, GroupPalette, group_palette
+from .layout_config import LayoutConfig
+from .schema import Schema
+from .validation import Relationship, validate_schema
 
 
-def quote_d2(value: str) -> str:
-    """Quote keys and values, including substitutions which JSON quoting permits."""
-    if any(ord(c) < 32 and c not in "\t\r\n" for c in value):
-        raise ValueError("D2 text contains an unsupported control character")
-    value = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("${", "\\${")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
-    return f'"{value}"'
-
-
-def _unique_columns(table: Table) -> set[str]:
-    unique = set()
-    for index in table.indexes:
-        names = index.column_names or index.columns
-        if (
-            not index.unique
-            or index.where
-            or index.expression_columns
-            or len(names) != 1
-        ):
-            continue
-        if names[0] is None:
-            continue
-        matches = [c.name for c in table.columns if c.name == names[0]]
-        if not matches:
-            matches = [
-                c.name for c in table.columns if c.name.lower() == names[0].lower()
-            ]
-        if len(matches) == 1:
-            unique.add(matches[0])
-    return unique
-
-
-def _notes(table: Table, relations: tuple[Relationship, ...]) -> str:
-    lines = []
-    primary = primary_columns(table)
-    if primary:
-        lines.append(
-            f"{table.primary_key_name or 'PK'}: ({', '.join(sorted(primary))})"
-        )
-    for fk in relations:
-        if fk.table == table.name:
-            lines.append(
-                f"{fk.name or 'FK'}: ({', '.join(fk.columns)}) -> {fk.ref_table} ({', '.join(fk.ref_columns)})"
-            )
-    for index in sorted(
-        table.indexes,
-        key=lambda i: (
-            i.name or "",
-            i.columns,
-            i.unique,
-            i.method or "",
-            i.where or "",
-        ),
-    ):
-        label = "Unique index" if index.unique else "Index"
-        name = f" {index.name}" if index.name else ""
-        method = f" using {index.method}" if index.method else ""
-        where = f" where {index.where}" if index.where else ""
-        lines.append(f"{label}{name}{method} on [{', '.join(index.columns)}]{where}")
-    return "\n".join(lines)
-
-
-def _diagram_lines(
-    schema: Schema,
-    relationships: tuple[Relationship, ...],
-    *,
-    show_types: bool,
-    style: str,
+def _packed_lines(
+    columns: tuple[tuple[Component, ...], ...],
+    emit: Callable[[Component], list[str]],
+    direction: str,
 ) -> list[str]:
-    lines = []
-    foreign_columns: dict[str, set[str]] = {}
-    for fk in relationships:
-        foreign_columns.setdefault(fk.table, set()).update(fk.columns)
-    for name, table in sorted(schema.items()):
-        lines.extend([f"{quote_d2(name)}: {{", "  shape: sql_table"])
-        if style == "clean":
-            lines.extend(CLEAN_TABLE)
-        primary = primary_columns(table)
-        foreign = foreign_columns.get(name, set())
-        unique = _unique_columns(table)
-        for column in table.columns:
-            constraints = [
-                label
-                for label, names in (
-                    ("primary_key", primary),
-                    ("foreign_key", foreign),
-                    ("unique", unique),
+    if sum(map(len, columns)) == 1:
+        return emit(columns[0][0])
+    lines = [
+        "grid-rows: 1",
+        f"grid-columns: {len(columns)}",
+        f"grid-gap: {GRID_GAP}",
+        "",
+    ]
+    for column_index, column in enumerate(columns):
+        body = [
+            f"grid-rows: {len(column)}",
+            "grid-columns: 1",
+            "horizontal-gap: 0",
+            f"vertical-gap: {GRID_GAP}",
+        ]
+        for index, component in enumerate(column):
+            body.extend(
+                container_lines(
+                    f"_erd_component_{index}",
+                    [f"direction: {direction}", *emit(component)],
                 )
-                if column.name in names
-            ]
-            suffix = ""
-            if constraints:
-                value = (
-                    constraints[0]
-                    if len(constraints) == 1
-                    else f"[{'; '.join(constraints)}]"
-                )
-                suffix = f" {{constraint: {value}}}"
-            data_type = column.data_type if show_types else ""
-            lines.append(f"  {quote_d2(column.name)}: {quote_d2(data_type)}{suffix}")
-        notes = _notes(table, relationships)
-        if notes:
-            lines.append(f"  tooltip: {quote_d2(notes)}")
-        lines.extend(["}", ""])
-    for fk in relationships:
-        count = len(fk.columns)
-        for number, (local, remote) in enumerate(zip(fk.columns, fk.ref_columns), 1):
-            connection = f"{quote_d2(fk.table)}.{quote_d2(local)} -> {quote_d2(fk.ref_table)}.{quote_d2(remote)}"
-            edge_label = ""
-            if count > 1:
-                label = fk.name or f"FK ({', '.join(fk.columns)})"
-                edge_label = f"{label} [{number}/{count}]"
-            if fk.table == fk.ref_table:
-                # D2 0.7.1/ELK routes self loops around the table boundary; retain
-                # visible field semantics even when row ports are not respected.
-                edge_label = (
-                    f"{edge_label}: " if edge_label else ""
-                ) + f"{local} → {remote}"
-            if edge_label:
-                connection += f": {quote_d2(edge_label)}"
-            if style == "clean":
-                lines.extend(
-                    [
-                        connection + (" {" if edge_label else ": {"),
-                        *CLEAN_CONNECTION,
-                        "}",
-                    ]
-                )
-            else:
-                lines.append(connection)
+            )
+        lines.extend(container_lines(f"_erd_column_{column_index}", body))
     return lines
 
 
-def _container_lines(name: str, body: list[str]) -> list[str]:
-    # Hide only the container's fill/border. opacity: 0 would hide its tables too.
-    return [
-        f"{name}: {{",
-        '  label: ""',
-        "  style.fill: transparent",
-        "  style.stroke-width: 0",
-        *("  " + line if line else "" for line in body),
-        "}",
-    ]
+def _component_lines(
+    schema: Schema,
+    component: Component,
+    groups: tuple[BusinessGroup, ...],
+    *,
+    show_types: bool,
+    style: str,
+    direction: str,
+    automatic: bool,
+    metadata: tuple[Relationship, ...] | None = None,
+    inherited_palette: GroupPalette | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    members = set(component.tables)
+    metadata = component.relationships if metadata is None else metadata
+    groups = tuple(g for g in groups if g.tables[0] in members)
+    if len(groups) == 1 and not groups[0].label:
+        ranks = (
+            layout_ranks(
+                component.tables,
+                tuple((f.table, f.ref_table) for f in component.relationships),
+            )
+            if inherited_palette and automatic
+            else None
+        )
+        return diagram_lines(
+            {n: schema[n] for n in members},
+            component.relationships,
+            show_types=show_types,
+            style=style,
+            metadata=metadata,
+            palette=inherited_palette,
+            ranks=ranks,
+        ), {n: quote_d2(n) for n in members}
+    keys = {
+        g.key: f"_erd_group_{sha256(g.key.encode()).hexdigest()[:16]}"
+        if g.label
+        else f"_erd_group_{i}"
+        for i, g in enumerate(groups)
+    }
+    owners = {n: keys[g.key] for g in groups for n in g.tables}
+    internal: dict[str, list[Relationship]] = {key: [] for key in keys.values()}
+    external = []
+    for fk in component.relationships:
+        if owners[fk.table] == owners[fk.ref_table]:
+            internal[owners[fk.table]].append(fk)
+        else:
+            external.append(fk)
+    # Include ancestor-level edges: a nested subcommunity with an external
+    # field reference must also remain outside grid cells.
+    linked = {
+        owners[n]
+        for f in metadata
+        for n, other in ((f.table, f.ref_table), (f.ref_table, f.table))
+        if n in owners and owners.get(other) != owners[n]
+    }
+    weights = {}
+    lines = []
+    paths = {}
+    for group in groups:
+        key = keys[group.key]
+        edges = tuple(internal[key])
+        tables = {n: schema[n] for n in group.tables}
+        palette = (
+            group_palette(group.key, group.color) if group.label else inherited_palette
+        )
+
+        def emit(part: Component) -> tuple[list[str], dict[str, str]]:
+            if group.label:
+                # One business level plus one inferred community level. Child
+                # groups have no business label, so this recursion is bounded.
+                communities = (
+                    group_tables(part.tables, part.relationships)
+                    if automatic
+                    else (part.tables,)
+                )
+                return _component_lines(
+                    schema,
+                    part,
+                    tuple(
+                        BusinessGroup(f"relations:{names[0]}", names)
+                        for names in communities
+                    ),
+                    show_types=show_types,
+                    style=style,
+                    direction=direction,
+                    automatic=automatic,
+                    metadata=metadata,
+                    inherited_palette=palette,
+                )
+            ranks = (
+                layout_ranks(
+                    part.tables,
+                    tuple((f.table, f.ref_table) for f in part.relationships),
+                )
+                if automatic
+                else None
+            )
+            return diagram_lines(
+                {n: schema[n] for n in part.tables},
+                part.relationships,
+                show_types=show_types,
+                style=style,
+                palette=palette,
+                metadata=metadata,
+                ranks=ranks,
+            ), {n: quote_d2(n) for n in part.tables}
+
+        region = Component(group.tables, edges)
+        # Grid boundaries are safe only when no external FK enters a cell.
+        # A business group with external edges must remain a native ELK region,
+        # including any of its tables which have no internal relationship.
+        if key in linked:
+            body, local_paths = emit(region)
+            paths.update({n: f"{key}.{path}" for n, path in local_paths.items()})
+        else:
+            # No ancestor can reference these packed cells. Their paths need
+            # not escape this region; every FK is emitted inside its own cell.
+            body = _packed_lines(
+                plan_layout(tables, edges, show_types=show_types, direction=direction),
+                lambda part: emit(part)[0],
+                direction,
+            )
+        size = estimate_size(region, schema, show_types, direction)
+        weights[key] = size[1 if direction in {"right", "left"} else 0]
+        label = f"{group.label} · {len(group.tables)} tables" if group.label else ""
+        lines.extend(
+            container_lines(
+                key, body, label=label, palette=palette if group.label else None
+            )
+        )
+    ranks = (
+        centered_ranks(
+            tuple(sorted(internal)),
+            tuple((owners[f.table], owners[f.ref_table]) for f in external),
+            hubs=tuple(keys[g.key] for g in groups if len(g.tables) == 1),
+            weights=weights,
+        )
+        if automatic
+        else None
+    )
+    lines.extend(
+        relationship_lines(
+            tuple(external),
+            style=style,
+            paths=paths,
+            ranks={name: ranks[owner] for name, owner in owners.items()}
+            if ranks
+            else None,
+        )
+    )
+    return lines, paths
 
 
 def build_d2(
@@ -163,14 +204,23 @@ def build_d2(
     show_types: bool = False,
     direction: str = "right",
     style: str = "clean",
+    grouping: str = "auto",
+    layout_config: LayoutConfig | None = None,
 ) -> str:
     if direction not in {"up", "down", "left", "right"}:
         raise ValueError("D2 direction must be up, down, left or right")
     if style not in STYLES:
         raise ValueError("D2 style must be clean or classic")
+    if grouping not in {"auto", "none"}:
+        raise ValueError("D2 grouping must be auto or none")
+    if layout_config is not None and not isinstance(layout_config, LayoutConfig):
+        raise ValueError("Layout config: expected a LayoutConfig object")
     result = validate_schema(schema)
     if result.errors:
         raise ValueError("Schema validation failed: " + "; ".join(result.errors))
+    groups = plan_groups(
+        schema, result.relationships, automatic=grouping == "auto", config=layout_config
+    )
     lines = [
         "# Generated from migrations; edit SQL or FK configuration, then regenerate.",
         "vars: {",
@@ -183,40 +233,25 @@ def build_d2(
         "",
     ]
     columns = plan_layout(
-        schema, result.relationships, show_types=show_types, direction=direction
+        schema,
+        result.relationships,
+        show_types=show_types,
+        direction=direction,
+        keep_together=tuple(g.tables for g in groups if g.label),
     )
-    if sum(map(len, columns)) == 1:
-        lines.extend(
-            _diagram_lines(
-                schema, result.relationships, show_types=show_types, style=style
-            )
+    lines.extend(
+        _packed_lines(
+            columns,
+            lambda component: _component_lines(
+                schema,
+                component,
+                groups,
+                show_types=show_types,
+                style=style,
+                direction=direction,
+                automatic=grouping == "auto",
+            )[0],
+            direction,
         )
-    else:
-        lines.extend(
-            [
-                "grid-rows: 1",
-                f"grid-columns: {len(columns)}",
-                f"grid-gap: {GRID_GAP}",
-                "",
-            ]
-        )
-        for column_index, column in enumerate(columns):
-            body = [
-                f"grid-rows: {len(column)}",
-                "grid-columns: 1",
-                "horizontal-gap: 0",
-                f"vertical-gap: {GRID_GAP}",
-            ]
-            for component_index, component in enumerate(column):
-                tables = {name: schema[name] for name in component.tables}
-                diagram = _diagram_lines(
-                    tables, component.relationships, show_types=show_types, style=style
-                )
-                body.extend(
-                    _container_lines(
-                        f"_erd_component_{component_index}",
-                        [f"direction: {direction}", *diagram],
-                    )
-                )
-            lines.extend(_container_lines(f"_erd_column_{column_index}", body))
+    )
     return "\n".join(lines).rstrip() + "\n"

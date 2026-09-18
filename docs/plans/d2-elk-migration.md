@@ -45,7 +45,7 @@ D2 定义图的内容，ELK 负责布局与连线路由。项目直接调用 D2 
 
 - 旧 CLI 退出码为 0，报告 0 条解析失败，成功写出 draw.io。
 - 实际 Schema 有 6 张表、26 列、5 个外键、8 个索引。
-- `DROP TABLE public.temp_audit` 未生效。
+- `DROP TABLE demo_library.temp_audit` 未生效。
 - `DROP COLUMN last_login` 和 `DROP COLUMN order_label` 未生效。
 - 已删除的索引仍残留。
 
@@ -144,12 +144,12 @@ render_d2(source_path: Path, output_path: Path,
 | 字段和类型 | 每列一行；保留 `--show-types` | 关闭类型时仍保留字段与连线 |
 | 主键 / 外键列 | `constraint: primary_key / foreign_key`；重合时用数组 | 复合主键可以标记各参与列，但整体约束保留在说明中 |
 | 单列无条件唯一约束 | `constraint: unique` | 不把复合 UNIQUE、条件唯一索引、表达式唯一索引误标为每列独立唯一 |
-| 外键 | `"public.orders"."user_id" -> "public.users"."id"` | 按实际列连接，处理去重与自引用 |
+| 外键 | `"demo_library.loan_requests"."user_id" -> "demo_library.members"."id"` | 按实际列连接，处理去重与自引用 |
 | 复合外键 | 按声明顺序逐对连接，并以相同约束标识关联 | 不把多条线描述成多个独立约束；重复声明只画一组 |
 | 索引/完整约束说明 | 复用 Schema 的说明能力，放入表 tooltip | 对已有说明缺失的索引名称/方法等字段，直接从 Index 补充，不能从 draw.io XML 回读 |
 | 共享静态说明 | SVG 可显式开启 `--force-appendix` | 表下固定备注改为 tooltip/附录，是需要记录的展示变化 |
 
-完整限定名应作为一个被转义的 D2 键，例如 `"public.users"`；裸写 `public.users` 会带入 D2 路径层级语义。标识符和文本值使用专门的 D2 转义函数，覆盖引号、反斜杠、换行、保留字、`${...}`、Unicode 和点号；不能直接拼接 SQL 原文，也不能假设 JSON 转义完全等价于 D2。[Strings](https://d2lang.com/tour/strings/)、[Variables & Substitutions](https://d2lang.com/tour/vars/)
+完整限定名应作为一个被转义的 D2 键，例如 `"demo_library.members"`；裸写 `demo_library.members` 会带入 D2 路径层级语义。标识符和文本值使用专门的 D2 转义函数，覆盖引号、反斜杠、换行、保留字、`${...}`、Unicode 和点号；不能直接拼接 SQL 原文，也不能假设 JSON 转义完全等价于 D2。[Strings](https://d2lang.com/tour/strings/)、[Variables & Substitutions](https://d2lang.com/tour/vars/)
 
 外键的特殊情况：
 

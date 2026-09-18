@@ -1,4 +1,4 @@
-CREATE TABLE public.users (
+CREATE TABLE demo_library.members (
     id INT PRIMARY KEY,
-    manager_id INT REFERENCES public.users(id)
+    sponsor_id INT REFERENCES demo_library.members(id)
 );

@@ -1,14 +1,14 @@
 -- +migrate Up
 
--- Group setup
+-- Fictional library reader role; exercises conditional PostgreSQL setup.
 -- +migrate StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT FROM pg_roles
-        WHERE rolname = 'analytics_reader'
+        WHERE rolname = 'demo_library_reader'
     ) THEN
-        CREATE ROLE analytics_reader
+        CREATE ROLE demo_library_reader
             NOSUPERUSER
             NOCREATEDB
             NOCREATEROLE
@@ -23,7 +23,7 @@ $$;
 DO $$
 BEGIN
     EXECUTE format(
-        'GRANT CONNECT ON DATABASE %I TO analytics_reader',
+        'GRANT CONNECT ON DATABASE %I TO demo_library_reader',
         CURRENT_DATABASE()
     );
 END
@@ -31,18 +31,18 @@ $$;
 -- +migrate StatementEnd
 
 GRANT USAGE
-    ON SCHEMA analytics_v1
-    TO analytics_reader;
+    ON SCHEMA demo_library
+    TO demo_library_reader;
 
 -- Grant read-only access to existing and future tables
 
 GRANT SELECT
-    ON ALL TABLES IN SCHEMA analytics_v1
-    TO analytics_reader;
+    ON ALL TABLES IN SCHEMA demo_library
+    TO demo_library_reader;
 
-ALTER DEFAULT PRIVILEGES IN SCHEMA analytics_v1
+ALTER DEFAULT PRIVILEGES IN SCHEMA demo_library
     GRANT SELECT
     ON TABLES
-    TO analytics_reader;
+    TO demo_library_reader;
 
 -- +migrate StatementEnd

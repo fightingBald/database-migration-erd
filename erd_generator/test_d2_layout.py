@@ -59,3 +59,21 @@ def test_layout_keeps_a_connected_group_intact_and_does_not_mutate_inputs():
     )
     assert schema == before
     assert any(group.tables == ("t0", "t1") for column in expected for group in column)
+
+
+def test_business_membership_joins_disconnected_parts_without_inventing_edges():
+    schema = {
+        n: Table(n, columns=[Column("id", "INT")]) for n in ("a", "b", "c", "d", "e")
+    }
+    schema["b"].foreign_keys = [ForeignKey(("id",), "c", ("id",))]
+    edges = validate_schema(schema).relationships
+    layout = plan_layout(
+        schema,
+        edges,
+        show_types=True,
+        direction="right",
+        keep_together=(("a", "b"), ("c", "d")),
+    )
+    blocks = [block for column in layout for block in column]
+    assert sorted(block.tables for block in blocks) == [("a", "b", "c", "d"), ("e",)]
+    assert tuple(f for block in blocks for f in block.relationships) == edges
