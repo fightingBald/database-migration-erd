@@ -10,3 +10,7 @@ parse_log/
 .DS_Store
 /TECH_SHARING_PPT.md
 /video.mp4
+
+# Local planning and validation notes; excluded from the public repository.
+/docs/plans/
+/docs/validation/

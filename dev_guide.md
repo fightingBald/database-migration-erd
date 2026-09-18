@@ -149,8 +149,6 @@ No additional runtime dependency or D2 executable is needed for source generatio
 
 Migration/rollback: grouped D2 adds `_erd_group_*` object-path prefixes and may use `<-` as well as `->`. Tools reading generated D2 must account for both connection directions. Add `--grouping none` (or `build_d2(..., grouping="none")`) and regenerate to restore the previous connected-graph layout. Disconnected component packing and SQL processing are unaffected; no database rollback is involved.
 
-The [business layout design](docs/plans/d2-business-layout.md) records the engine constraints and prototype comparisons. [Implementation validation](docs/validation/d2-business-layout.md) records the current checks separately from those prototypes.
-
 ## Relationships without database FK constraints
 
 Three sources are supported:
@@ -358,7 +356,6 @@ db/migration/         # sample SQL migrations
 sample_fk_config.yaml # sample additional relationships
 generated/            # ignored generated source, SVG and benchmark output
 .github/workflows/    # build/test/lint and real ELK checks
-docs/                 # business layout design and validation records
 ```
 
 SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business` and `d2_layout` over shared Schema and normalized relationships; the size-aware layout planner depends on the graph operations in `d2_grouping`, never the reverse. Generation then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
@@ -383,7 +380,7 @@ The `not integration` marker runs fast tests without requiring D2. The `integrat
 
 The benchmark script separately renders deterministic 50- and 200-table synthetic inputs. Each case writes source, SVG and `metrics.json` under `generated/benchmark-N/`, including duration, peak child-process RSS, output bytes and dimensions. These measurements do not predict every production graph's readability or runtime.
 
-CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command. [Local validation](docs/validation/d2-elk.md) records D2-only checks and remaining limits; [business layout design](docs/plans/d2-business-layout.md) describes layout boundaries and rollback options.
+CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command.
 
 ## Supported SQL and limitations
 
