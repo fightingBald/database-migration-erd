@@ -20,13 +20,24 @@ class Component:
 
 
 def connected_components(
-    schema: Schema, relationships: tuple[Relationship, ...]
+    schema: Schema,
+    relationships: tuple[Relationship, ...],
+    *,
+    keep_together: tuple[tuple[str, ...], ...] = (),
 ) -> tuple[Component, ...]:
-    """Use undirected connectivity; every FK remains inside one component."""
+    """Keep real FKs and presentation membership inside one packed region.
+
+    Membership joins affect adjacency only; returned relationships are always
+    exactly the real, validated foreign keys.
+    """
     neighbors = {name: set() for name in schema}
     for fk in relationships:
         neighbors[fk.table].add(fk.ref_table)
         neighbors[fk.ref_table].add(fk.table)
+    for members in keep_together:
+        for name in members[1:]:
+            neighbors[members[0]].add(name)
+            neighbors[name].add(members[0])
     visited = set()
     groups = []
     group_for_table = {}
@@ -126,19 +137,50 @@ def plan_layout(
     *,
     show_types: bool,
     direction: str,
+    keep_together: tuple[tuple[str, ...], ...] = (),
 ) -> tuple[tuple[Component, ...], ...]:
     """Choose columns by estimated aspect ratio and wasted area, without I/O.
 
     Validation belongs to the caller. Output order is independent of input order.
     Natural table dimensions and all connection routing remain D2/ELK's job.
     """
-    components = connected_components(schema, relationships)
+    components = connected_components(
+        schema, relationships, keep_together=keep_together
+    )
     if len(components) <= 1:
         return (components,)
-    items = [
-        (component, *_component_size(component, schema, show_types, direction))
-        for component in components
-    ]
+    return _pack(
+        [
+            (component, *estimate_size(component, schema, show_types, direction))
+            for component in components
+        ]
+    )
+
+
+def estimate_size(
+    component: Component, schema: Schema, show_types: bool, direction: str
+) -> tuple[int, int]:
+    """Estimate a region which may join otherwise disconnected business tables."""
+    parts = connected_components(
+        {n: schema[n] for n in component.tables}, component.relationships
+    )
+    if len(parts) == 1:
+        return _component_size(component, schema, show_types, direction)
+    sizes = {
+        part.tables: _component_size(part, schema, show_types, direction)
+        for part in parts
+    }
+    packed = _pack([(part, *sizes[part.tables]) for part in parts])
+    width = sum(max(sizes[part.tables][0] for part in col) for col in packed)
+    height = max(
+        sum(sizes[part.tables][1] for part in col) + GRID_GAP * (len(col) - 1)
+        for col in packed
+    )
+    return width + GRID_GAP * (len(packed) - 1), height + 2 * GRID_GAP
+
+
+def _pack(items: list[tuple[Component, int, int]]) -> tuple[tuple[Component, ...], ...]:
+    """Pack estimated rectangles; shared by legacy and business-region planning."""
     items.sort(key=lambda item: (-item[2], -item[1], item[0].tables))
     area = sum(width * height for _, width, height in items)
     best_score = math.inf

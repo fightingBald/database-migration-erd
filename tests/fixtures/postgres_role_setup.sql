@@ -1,6 +1,6 @@
 -- +migrate Up
 
--- Group setup
+-- Fictional library reader role; exercises conditional PostgreSQL setup.
 -- +migrate StatementBegin
 DO $$
 BEGIN

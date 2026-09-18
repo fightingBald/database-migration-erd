@@ -44,8 +44,10 @@ def test_golden_source_matches_and_compiles(tmp_path, style):
     )
     render_d2(path, tmp_path / "simple.svg")
     root = ET.parse(tmp_path / "simple.svg").getroot()
-    assert "public.users" in ["".join(e.itertext()) for e in root.iter(NS + "text")]
-    assert any("manager_id" in (e.text or "") for e in root.iter(NS + "title"))
+    assert "demo_library.members" in [
+        "".join(e.itertext()) for e in root.iter(NS + "text")
+    ]
+    assert any("sponsor_id" in (e.text or "") for e in root.iter(NS + "title"))
     if style == "clean":
         # Check native SVG colors so a renderer silently ignoring the source
         # palette cannot pass just because the D2 text contains style settings.
@@ -107,14 +109,14 @@ def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax
     root = ET.parse(output).getroot()
     texts = ["".join(e.itertext()) for e in root.iter(NS + "text")]
     assert "BIGSERIAL" in texts
-    assert {t for t in texts if t.startswith("public.")} == {
-        "public.users",
-        "public.purchase_orders",
-        "public.products",
-        "public.order_items",
-        "public.roles",
+    assert {t for t in texts if t.startswith("demo_library.")} == {
+        "demo_library.members",
+        "demo_library.loans",
+        "demo_library.books",
+        "demo_library.loan_items",
+        "demo_library.membership_types",
     }
-    assert not {"last_login", "order_label"}.intersection(texts)
+    assert not {"last_visit", "loan_label"}.intersection(texts)
 
 
 @pytest.mark.parametrize("style", ["classic", "clean"])
@@ -209,8 +211,8 @@ def test_library_role_migration_renders_real_svg(tmp_path):
     migrations.mkdir()
     (migrations / "V1.sql").write_text(
         "CREATE SCHEMA demo_library;\n"
-        "CREATE TABLE demo_library.accounts(id int PRIMARY KEY);\n"
-        "CREATE TABLE demo_library.events(id int, account_id int REFERENCES demo_library.accounts(id));\n"
+        "CREATE TABLE demo_library.members(id int PRIMARY KEY);\n"
+        "CREATE TABLE demo_library.loans(id int, member_id int REFERENCES demo_library.members(id));\n"
         + (ROOT / "tests/fixtures/postgres_role_setup.sql").read_text(),
         encoding="utf-8",
     )
@@ -225,15 +227,11 @@ def test_library_role_migration_renders_real_svg(tmp_path):
     assert result.returncode == 0, result.stderr
     source = output.with_suffix(".d2").read_text()
     assert source.count("shape: sql_table") == 2
-    assert (
-        '"demo_library.events"."account_id" -> "demo_library.accounts"."id"' in source
-    )
+    assert '"demo_library.loans"."member_id" -> "demo_library.members"."id"' in source
     texts = {
         "".join(element.itertext())
         for element in ET.parse(output).getroot().iter(NS + "text")
     }
-    assert {"demo_library.accounts", "demo_library.events", "account_id"}.issubset(
-        texts
-    )
+    assert {"demo_library.members", "demo_library.loans", "member_id"}.issubset(texts)
     assert "demo_library_reader" not in texts
     assert "layout=elk" in result.stderr

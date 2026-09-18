@@ -1,9 +1,12 @@
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
 from erd_generator.d2 import build_d2, quote_d2
 from erd_generator.schema import Column, ForeignKey, Index, Table
+from erd_generator.sql_parser import parse_schema_from_sql
+from erd_generator.layout_config import GroupRule, LayoutConfig
 
 
 def sample_schema():
@@ -31,6 +34,47 @@ def sample_schema():
             ],
         ),
     }
+
+
+def test_automatic_business_regions_have_labels_and_colours_without_configuration():
+    schema = {
+        f"{p}_{s}": Table(f"{p}_{s}", columns=[Column("id", "INT")])
+        for p in ("books", "loans", "members")
+        for s in ("details", "files", "links")
+    }
+    before = deepcopy(schema)
+    source = build_d2(schema)
+    assert (
+        'label: "Books' in source
+        and 'label: "Loans' in source
+        and 'label: "Members' in source
+    )
+    assert source.count("label.near: top-left") == 3
+    assert source.count("shape: sql_table") == 9
+    assert source.count("grid-rows:") >= 4
+    assert "label.near: top-left" not in build_d2(schema, grouping="none")
+    assert schema == before
+
+
+def test_configuration_can_group_disconnected_tables_and_preserve_cross_group_fk_metadata():
+    schema = sample_schema()
+    schema["extra"] = Table("extra", columns=[Column("id")])
+    config = LayoutConfig(
+        (
+            GroupRule("local", ("public.child", "extra"), "Local ${literal}", "gold"),
+            GroupRule("remote", ("public.parent",), "Remote", "green"),
+        )
+    )
+    source = build_d2(schema, layout_config=config)
+    assert source.count("shape: sql_table") == 3
+    assert 'label: "Local \\${literal}' in source
+    assert "constraint: [primary_key; foreign_key]" in source
+    assert "FK: (tenant, parent_id)" not in source  # Preserve the named constraint.
+    assert "fk_parent: (tenant, parent_id)" in source
+    assert "fk_parent [1/2]" in source and "fk_parent [2/2]" in source
+    assert (
+        "grid-rows:" not in source
+    )  # The connected business regions share native ELK routing.
 
 
 def test_sql_tables_and_composite_foreign_key_groups():
@@ -132,6 +176,28 @@ def test_rejects_invalid_style(style):
         build_d2(sample_schema(), style=style)
 
 
+def test_rejects_invalid_python_layout_configuration():
+    with pytest.raises(ValueError, match="Layout config"):
+        build_d2(sample_schema(), layout_config={})
+
+
+def test_large_explicit_business_regions_retain_internal_relationship_communities():
+    schema = {}
+    parse_schema_from_sql(
+        (
+            Path(__file__).resolve().parents[1] / "tests/fixtures/related_tables.sql"
+        ).read_text(),
+        schema,
+    )
+    left = tuple(n for n in schema if int(n[-2:]) % 4 < 2)
+    right = tuple(n for n in schema if n not in left)
+    config = LayoutConfig((GroupRule("left", left), GroupRule("right", right)))
+    source = build_d2(schema, layout_config=config)
+    assert source.count("label.near: top-left") == 2
+    assert source.count('label: ""') == 4
+    assert source.count("shape: sql_table") == 40
+
+
 def test_notes_and_relations_are_independent_of_metadata_insertion_order():
     schema = sample_schema()
     table = schema["public.child"]
@@ -214,3 +280,26 @@ def test_one_connected_component_keeps_native_elk_source():
     source = build_d2(sample_schema())
     assert "grid-columns:" not in source
     assert '"public.child"."tenant" -> "public.parent"."tenant"' in source
+
+
+def test_large_connected_graph_groups_automatically_with_an_explicit_rollback():
+    schema = {}
+    fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/related_tables.sql"
+    parse_schema_from_sql(fixture.read_text(), schema)
+    before = deepcopy(schema)
+    grouped = build_d2(schema, show_types=True)
+    assert grouped.count('  label: ""') == 4
+    assert grouped.count("shape: sql_table") == 40
+    assert "grid-columns:" not in grouped
+    assert " <- " in grouped
+    assert grouped == build_d2(dict(reversed(list(schema.items()))), show_types=True)
+    flat = build_d2(schema, show_types=True, grouping="none")
+    assert "_erd_group_" not in flat
+    assert flat.count("shape: sql_table") == 40
+    assert " <- " not in flat
+    assert schema == before
+
+
+def test_invalid_grouping_is_rejected():
+    with pytest.raises(ValueError, match="grouping"):
+        build_d2(sample_schema(), grouping="unknown")

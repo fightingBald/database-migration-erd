@@ -180,6 +180,74 @@ def test_help_shows_explicit_input_and_output():
     assert "schema.svg" in result.stdout and "schema.d2" in result.stdout
 
 
+def test_business_groups_are_automatic_and_can_be_overridden_without_renderer(tmp_path):
+    migrations = tmp_path / "sql"
+    migrations.mkdir()
+    (migrations / "V1.sql").write_text(
+        "\n".join(
+            f"CREATE TABLE {n} (id INT PRIMARY KEY);"
+            for n in ("books", "books_details", "books_files", "audit")
+        )
+    )
+    output = tmp_path / "schema.d2"
+    result = cli(migrations, output, env=dict(os.environ, PATH=""))
+    assert result.returncode == 0, result.stderr
+    assert 'label: "Books' in output.read_text()
+    config = tmp_path / "layout.yaml"
+    config.write_text(
+        'groups:\n  custom:\n    tables: ["books", "books_*", "audit"]\n    label: 图书\n    color: gold\n'
+    )
+    result = cli(
+        migrations,
+        output,
+        "--layout-config",
+        config,
+        "--grouping",
+        "none",
+        env=dict(os.environ, PATH=""),
+    )
+    assert result.returncode == 0, result.stderr
+    source = output.read_text()
+    assert 'label: "图书' in source and "#FCEDBD" in source
+    assert source.count("shape: sql_table") == 4
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "groups: [",
+        "groups: {one: {tables: [absent]}}",
+        "groups: {one: {tables: [customers]}, two: {tables: [customers]}}",
+    ],
+)
+def test_invalid_layout_configuration_preserves_both_outputs(
+    tmp_path, simple_migrations, payload
+):
+    config = tmp_path / "layout.yaml"
+    config.write_text(payload)
+    source, svg = tmp_path / "schema.d2", tmp_path / "schema.svg"
+    source.write_text("old source")
+    svg.write_text("old image")
+    result = cli(
+        simple_migrations, svg, "--layout-config", config, "--log-dir", tmp_path
+    )
+    assert result.returncode == 1
+    assert "Layout config" in result.stderr
+    assert source.read_text() == "old source" and svg.read_text() == "old image"
+
+
+def test_drawio_rejects_layout_configuration(tmp_path):
+    result = cli(
+        *sample_args(tmp_path, "drawio"),
+        "--format",
+        "drawio",
+        "--layout-config",
+        tmp_path / "missing.yaml",
+    )
+    assert result.returncode == 2
+    assert "not applicable to draw.io" in result.stderr
+
+
 def test_clean_style_is_default_and_classic_can_be_selected(tmp_path):
     args = sample_args(tmp_path)
     result = cli(*args)
@@ -190,6 +258,29 @@ def test_clean_style_is_default_and_classic_can_be_selected(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "theme-overrides:" not in source.read_text()
     assert source.read_text().count("shape: sql_table") == 5
+
+
+def test_grouping_can_be_disabled_without_changing_the_default_command(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1.sql").write_text(
+        (ROOT / "tests/fixtures/related_tables.sql").read_text()
+    )
+    output = tmp_path / "schema.d2"
+    result = cli(migrations, output)
+    assert result.returncode == 0, result.stderr
+    assert "_erd_group_" in output.read_text()
+    result = cli(migrations, output, "--grouping", "none")
+    assert result.returncode == 0, result.stderr
+    assert "_erd_group_" not in output.read_text()
+
+
+def test_d2_grouping_is_rejected_for_drawio(tmp_path):
+    result = cli(
+        *sample_args(tmp_path, "drawio"), "--format", "drawio", "--grouping", "auto"
+    )
+    assert result.returncode == 2
+    assert not (tmp_path / "schema.drawio").exists()
 
 
 @pytest.mark.parametrize("style", ["clean", "classic"])
@@ -233,6 +324,7 @@ runpy.run_module('erd_generator', run_name='__main__')
         ["--force-appendix"],
         ["--render", "png"],
         ["--style", "unknown"],
+        ["--grouping", "unknown"],
     ],
 )
 def test_invalid_d2_options_fail_before_writing(tmp_path, options, positional):
@@ -305,7 +397,9 @@ def test_missing_renderer_preserves_old_svg(tmp_path):
 
 def test_unknown_fk_config_prevents_partial_diagram(tmp_path):
     config = tmp_path / "fk.yaml"
-    config.write_text("missing: {fks: [[id, public.users, id]]}", encoding="utf-8")
+    config.write_text(
+        "missing: {fks: [[id, demo_library.members, id]]}", encoding="utf-8"
+    )
     result = cli(*sample_args(tmp_path), "--fk-config", config)
     assert result.returncode == 1
     assert not (tmp_path / "schema.d2").exists()
@@ -334,9 +428,9 @@ def test_library_role_migration_preserves_surrounding_ddl(tmp_path):
     migrations.mkdir()
     setup = (ROOT / "tests/fixtures/postgres_role_setup.sql").read_text()
     (migrations / "V1.sql").write_text(
-        "CREATE TABLE demo_library.accounts(id int PRIMARY KEY);\n"
+        "CREATE TABLE demo_library.members(id int PRIMARY KEY);\n"
         + setup
-        + "\nCREATE TABLE demo_library.events(id int, account_id int REFERENCES demo_library.accounts(id));\n",
+        + "\nCREATE TABLE demo_library.loans(id int, member_id int REFERENCES demo_library.members(id));\n",
         encoding="utf-8",
     )
     output = tmp_path / "schema.d2"
@@ -344,9 +438,7 @@ def test_library_role_migration_preserves_surrounding_ddl(tmp_path):
     assert result.returncode == 0, result.stderr
     source = output.read_text()
     assert source.count("shape: sql_table") == 2
-    assert (
-        '"demo_library.events"."account_id" -> "demo_library.accounts"."id"' in source
-    )
+    assert '"demo_library.loans"."member_id" -> "demo_library.members"."id"' in source
     assert "demo_library_reader" not in source
     assert not (tmp_path / "parse_log").exists()
 

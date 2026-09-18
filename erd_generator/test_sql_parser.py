@@ -169,26 +169,26 @@ def test_sample_migrations_have_expected_final_schema():
     apply_foreign_key_config(schema, entries, config_source=source)
     assert not failures
     assert set(schema) == {
-        "public.users",
-        "public.purchase_orders",
-        "public.products",
-        "public.order_items",
-        "public.roles",
+        "demo_library.members",
+        "demo_library.loans",
+        "demo_library.books",
+        "demo_library.loan_items",
+        "demo_library.membership_types",
     }
     assert sum(len(t.columns) for t in schema.values()) == 21
     assert sum(len(t.foreign_keys) for t in schema.values()) == 5
     # The original inline email UNIQUE and the later named UNIQUE both remain.
     assert sum(len(t.indexes) for t in schema.values()) == 7
-    assert [i.name for i in schema["public.users"].indexes] == [
+    assert [i.name for i in schema["demo_library.members"].indexes] == [
         "",
-        "users_email_unique",
-        "users_email_status_unique",
-        "idx_users_active_email",
-        "idx_users_lower_email",
+        "members_email_unique",
+        "members_email_status_unique",
+        "idx_members_active_email",
+        "idx_members_lower_email",
     ]
-    assert schema["public.users"].get_column("last_login") is None
-    assert schema["public.purchase_orders"].get_column("order_label") is None
-    assert schema["public.users"].get_column("status").nullable is False
+    assert schema["demo_library.members"].get_column("last_visit") is None
+    assert schema["demo_library.loans"].get_column("loan_label") is None
+    assert schema["demo_library.members"].get_column("status").nullable is False
 
 
 def test_malformed_sql_records_failure():
