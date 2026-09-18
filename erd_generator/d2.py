@@ -161,10 +161,9 @@ def _component_lines(
             )
         size = estimate_size(region, schema, show_types, direction)
         weights[key] = size[1 if direction in {"right", "left"} else 0]
-        label = f"{group.label} · {len(group.tables)} tables" if group.label else ""
         lines.extend(
             container_lines(
-                key, body, label=label, palette=palette if group.label else None
+                key, body, label=group.label, palette=palette if group.label else None
             )
         )
     ranks = (

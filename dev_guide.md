@@ -123,7 +123,7 @@ groups:
     color: gold
 ```
 
-Only `tables` is required per group. `label` defaults to the group key; colour is automatic unless overridden with `blue`, `gold`, `green`, `violet`, `slate`, `rose`, `teal` or `orange`. Colours apply to the region and its table headers with either clean or classic styling. Unmatched tables continue to be inferred automatically. Explicit membership is never changed by inference or hub placement, and a group can contain tables from separate FK components.
+Only `tables` is required per group. `label` defaults to the group key; region titles show the label without an appended table count. Colour is automatic unless overridden with `blue`, `gold`, `green`, `violet`, `slate`, `rose`, `teal` or `orange`. Colours apply to the region and its table headers with either clean or classic styling. Unmatched tables continue to be inferred automatically. Explicit membership is never changed by inference or hub placement, and a group can contain tables from separate FK components.
 
 Selectors first match an exact Schema table name, then use case-sensitive shell-style wildcards (`*`, `?`, `[abc]`). Use complete qualified names; there is no unqualified-name fallback. Exact names containing wildcard characters take precedence. Overlaps between groups, zero-match selectors, empty files/groups/lists, unknown fields, invalid values, duplicate YAML keys and YAML merge keys are errors. These errors are reported before either existing output is replaced. There is no implicit configuration-file search.
 
