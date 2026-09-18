@@ -45,7 +45,7 @@ def region_boxes(root):
         if label is None:
             continue
         text = "".join(label.itertext())
-        if not text.endswith(" tables"):
+        if not text:
             continue
         shape = group.find(f"{NS}g[@class='shape']/{NS}rect")
         if shape is not None:
@@ -67,7 +67,7 @@ def assert_named_regions(root, schema, config=None):
     assert len(regions) == len(expected)
     assert_no_overlaps(regions)
     for group in expected:
-        region = regions[f"{group.label} · {len(group.tables)} tables"]
+        region = regions[group.label]
         for name in group.tables:
             box = boxes[name]
             assert region["x"] <= box["x"] and region["y"] + 24 <= box["y"]

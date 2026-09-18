@@ -45,9 +45,9 @@ def test_automatic_business_regions_have_labels_and_colours_without_configuratio
     before = deepcopy(schema)
     source = build_d2(schema)
     assert (
-        'label: "Books' in source
-        and 'label: "Loans' in source
-        and 'label: "Members' in source
+        'label: "Books"' in source
+        and 'label: "Loans"' in source
+        and 'label: "Members"' in source
     )
     assert source.count("label.near: top-left") == 3
     assert source.count("shape: sql_table") == 9
@@ -67,7 +67,8 @@ def test_configuration_can_group_disconnected_tables_and_preserve_cross_group_fk
     )
     source = build_d2(schema, layout_config=config)
     assert source.count("shape: sql_table") == 3
-    assert 'label: "Local \\${literal}' in source
+    assert 'label: "Local \\${literal}"' in source
+    assert 'label: "Remote"' in source
     assert "constraint: [primary_key; foreign_key]" in source
     assert "FK: (tenant, parent_id)" not in source  # Preserve the named constraint.
     assert "fk_parent: (tenant, parent_id)" in source
