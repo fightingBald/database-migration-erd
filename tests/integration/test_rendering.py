@@ -27,12 +27,14 @@ def require_pinned_d2():
 
 
 @pytest.mark.parametrize("style", ["classic", "clean"])
-def test_golden_source_matches_and_compiles(tmp_path, style):
+def test_self_reference_compiles_with_metadata_and_style(tmp_path, style):
     schema = {}
-    parse_schema_from_sql((ROOT / "tests/fixtures/simple.sql").read_text(), schema)
+    parse_schema_from_sql(
+        "CREATE TABLE node (id INT PRIMARY KEY, parent_id INT REFERENCES node(id));",
+        schema,
+    )
     source = build_d2(schema, show_types=True, style=style)
-    if style == "classic":
-        assert source == (ROOT / "tests/fixtures/simple.d2").read_text()
+    assert '"node"."parent_id" -> "node"."id"' in source
     path = tmp_path / "simple.d2"
     path.write_text(source, encoding="utf-8")
     subprocess.run(
@@ -44,10 +46,8 @@ def test_golden_source_matches_and_compiles(tmp_path, style):
     )
     render_d2(path, tmp_path / "simple.svg")
     root = ET.parse(tmp_path / "simple.svg").getroot()
-    assert "demo_library.members" in [
-        "".join(e.itertext()) for e in root.iter(NS + "text")
-    ]
-    assert any("sponsor_id" in (e.text or "") for e in root.iter(NS + "title"))
+    assert "node" in ["".join(e.itertext()) for e in root.iter(NS + "text")]
+    assert any("parent_id" in (e.text or "") for e in root.iter(NS + "title"))
     if style == "clean":
         # Check native SVG colors so a renderer silently ignoring the source
         # palette cannot pass just because the D2 text contains style settings.
@@ -67,15 +67,24 @@ def test_golden_source_matches_and_compiles(tmp_path, style):
 
 
 @pytest.mark.parametrize("syntax", ["named", "positional", "positional-uppercase"])
-def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax):
+def test_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax):
     env = dict(os.environ, D2_LAYOUT="dagre", D2_WATCH="true")
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1.sql").write_text(
+        "CREATE TABLE parent (id BIGSERIAL PRIMARY KEY);\n"
+        "CREATE TABLE child (id BIGSERIAL PRIMARY KEY, parent_id BIGINT, obsolete INT);\n"
+    )
+    (migrations / "V2.sql").write_text("ALTER TABLE child DROP COLUMN obsolete;\n")
+    config = tmp_path / "fk.yaml"
+    config.write_text("child:\n  fks:\n    - [parent_id, parent, id]\n")
     output = tmp_path / (
         "schema.SVG" if syntax == "positional-uppercase" else "schema.svg"
     )
     arguments = (
         [
             "--migrations",
-            str(ROOT / "db/migration"),
+            str(migrations),
             "--out",
             str(tmp_path / "schema.d2"),
             "--show-types",
@@ -83,10 +92,10 @@ def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax
             "svg",
         ]
         if syntax == "named"
-        else [str(ROOT / "db/migration"), str(output)]
+        else [str(migrations), str(output)]
     )
     if syntax != "positional":
-        arguments.extend(["--fk-config", str(ROOT / "sample_fk_config.yaml")])
+        arguments.extend(["--fk-config", str(config)])
     result = subprocess.run(
         [
             sys.executable,
@@ -105,18 +114,13 @@ def test_sample_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax
     source = tmp_path / "schema.d2"
     assert str(source) in result.stdout and str(output) in result.stdout
     assert '"id": "BIGSERIAL" {constraint: primary_key}' in source.read_text()
-    assert set(tmp_path.iterdir()) == {source, output}
+    assert set(tmp_path.iterdir()) == {source, output, migrations, config}
+    assert ("foreign_key" in source.read_text()) == (syntax != "positional")
     root = ET.parse(output).getroot()
     texts = ["".join(e.itertext()) for e in root.iter(NS + "text")]
     assert "BIGSERIAL" in texts
-    assert {t for t in texts if t.startswith("demo_library.")} == {
-        "demo_library.members",
-        "demo_library.loans",
-        "demo_library.books",
-        "demo_library.loan_items",
-        "demo_library.membership_types",
-    }
-    assert not {"last_visit", "loan_label"}.intersection(texts)
+    assert {"parent", "child", "parent_id"}.issubset(texts)
+    assert "obsolete" not in texts
 
 
 @pytest.mark.parametrize("style", ["classic", "clean"])

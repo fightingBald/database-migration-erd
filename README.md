@@ -28,24 +28,22 @@ python -m pip install -r requirements.txt
 Pass your **SQL directory** followed by the **output file**:
 
 ```bash
-python -m erd_generator ./db/migration ./generated/schema.svg
+python -m erd_generator ./migrations ./generated/schema.svg
 ```
 
-This reads the SQL files under `./db/migration` and creates `schema.svg` plus `schema.d2` in `./generated/`. Open the SVG in a browser. Replace the paths with your own; the input should include the migrations needed to build the schema.
-
-Bundled examples use a fictional library (`demo_library.books`, `members`, `loans`), with no company database data.
+Replace `./migrations` with your SQL directory. The command creates `schema.svg` plus `schema.d2` in `./generated/`. Open the SVG in a browser. Supply the migrations needed to build your schema.
 
 To generate only D2 source, change the output extension. This does not require D2 to be installed:
 
 ```bash
-python -m erd_generator ./db/migration ./generated/schema.d2
+python -m erd_generator ./migrations ./generated/schema.d2
 ```
 
 The default uses clean styling, automatic business grouping, compact placement and visible column types. No grouping configuration is required. Add options after the two paths when needed:
 
 | Option | Purpose |
 | --- | --- |
-| `--fk-config file.yaml` | Add relationships; see the [sample YAML](sample_fk_config.yaml). |
+| `--fk-config file.yaml` | Add relationships; see the [YAML format](dev_guide.md#relationships-without-database-fk-constraints). |
 | `--layout-config file.yaml` | Override group membership, titles or colours; see [business layout](dev_guide.md#business-layout). |
 | `--direction down` | Lay out related tables from top to bottom. |
 | `--grouping none` | Disable automatic grouping and hub placement. |

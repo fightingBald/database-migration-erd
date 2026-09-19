@@ -26,9 +26,9 @@ The short command defaults to ELK, clean styling, automatic business/relationshi
 Optional overrides follow the two paths:
 
 ```bash
-python -m erd_generator ./db/migration ./generated/schema.svg --fk-config ./sample_fk_config.yaml
-python -m erd_generator ./db/migration ./generated/schema.svg --direction down
-python -m erd_generator ./db/migration ./generated/schema.d2 --hide-types
+python -m erd_generator ./migrations ./generated/schema.svg --fk-config ./fk.yaml
+python -m erd_generator ./migrations ./generated/schema.svg --direction down
+python -m erd_generator ./migrations ./generated/schema.d2 --hide-types
 ```
 
 Quote paths containing spaces. Generated files are overwritten by regeneration; edit migrations, FK configuration or generation options rather than the generated files.
@@ -52,7 +52,7 @@ The main command logs table, column and foreign-key counts, rendering version/la
 Existing named commands remain supported, including `--render svg` with a `.d2` output:
 
 ```bash
-python -m erd_generator --migrations ./db/migration --out ./generated/schema.d2 --show-types --render svg
+python -m erd_generator --migrations ./migrations --out ./generated/schema.d2 --show-types --render svg
 ```
 
 Use either the two positional paths or `--migrations` plus `--out`; mixing them is rejected. With named paths, column types are hidden unless `--show-types` is supplied, and a `.d2` output does not render unless `--render svg` is supplied. Named `--out` also accepts `.svg`. CLI and Python `erd_generator.main()` use the same D2-only workflow.
@@ -88,7 +88,7 @@ Disconnected tables and independent relationship groups are packed automatically
 
 Size estimates guide packing; they are not a guaranteed canvas ratio. A single large connected graph, exceptionally long labels or one very tall table can still make a wide/tall diagram. A connected graph is not split into grid cells just to meet an aspect ratio. `--direction` controls the ELK layout axis, and `--style classic` changes appearance while keeping automatic packing.
 
-The renderer sets ELK's `nodeNodeBetweenLayers=50` and `edgeNodeBetweenLayers=25`, with container padding 16 and self-loop spacing 100. This reduces routing space without changing grouping, fonts, columns or FK endpoints and requires no additional renders. Comparative integration tests render the same D2 source with the previous 70/40 spacing and check area, routed lengths, overlaps and field endpoints across isolated, chain, star, community, composite-cycle and library graphs in both horizontal and vertical directions. Route lengths are estimates from SVG path/control points, not exact curve lengths. Smaller area alone does not establish a better layout; long routes, crossings and readability must also be reviewed.
+The renderer sets ELK's `nodeNodeBetweenLayers=50` and `edgeNodeBetweenLayers=25`, with container padding 16 and self-loop spacing 100. This reduces routing space without changing grouping, fonts, columns or FK endpoints and requires no additional renders. Comparative integration tests render the same D2 source with the previous 70/40 spacing and check area, routed lengths, overlaps and field endpoints across isolated, chain, star, community, composite-cycle graphs in both horizontal and vertical directions. Route lengths are estimates from SVG path/control points, not exact curve lengths. Smaller area alone does not establish a better layout; long routes, crossings and readability must also be reviewed.
 
 Spacing rollback: restore the two renderer flags to `--elk-nodeNodeBetweenLayers=70` and `--elk-edgeNodeBetweenLayers=40`, then regenerate the SVG. D2 source and SQL are unchanged. When rendering D2 source directly, supply the same spacing and padding flags to reproduce the project's SVG placement.
 
@@ -96,7 +96,7 @@ Migration/rollback: generated D2 for disconnected graphs now nests objects under
 
 ### Business layout
 
-All bundled examples use a fictional library. Example schemas, roles, table names and relationships are synthetic; use the `demo_library` namespace for new examples. Keep real customer/company SQL, identifiers, local paths and generated diagrams out of fixtures and documentation. Generate example diagrams from the checked-in synthetic SQL.
+Tests use synthetic SQL and graph data. Keep real customer/company SQL, identifiers, local paths and generated diagrams out of tests and documentation. Test inputs belong in temporary directories or focused regression fixtures; user migrations and rendering reports stay outside version control.
 
 Automatic business grouping needs no YAML or additional command options. Repeated word prefixes such as `books_*`, `loans_*` and `members_*` can produce named regions with a title, subtle background and matching table headers. Namespace-qualified titles distinguish the same family in different schemas. Colours are derived from stable group identifiers, so unrelated groups do not rotate the palette. Titles also identify groups when colours are similar.
 
@@ -113,7 +113,7 @@ These are presentation inferences, not business-domain declarations extracted fr
 To correct an exception, create a small override file and pass it explicitly:
 
 ```bash
-python -m erd_generator ./db/migration ./generated/schema.svg --layout-config ./erd-layout.yaml
+python -m erd_generator ./migrations ./generated/schema.svg --layout-config ./erd-layout.yaml
 ```
 
 ```yaml
@@ -257,7 +257,7 @@ This documents the schema described by the checked-out migrations, not the live 
 
 ### Generate before building the site
 
-The following steps belong in the **application/documentation repository's existing GitHub Actions job**, after its checkout and Node setup. This example assumes an Ubuntu x64 runner, migrations in `db/migration/` and an npm-based Docusaurus site with a lockfile in `docs-site/`. Change those two paths to match your repository. Keep your site's existing Node version and deployment steps.
+The following steps belong in the **application/documentation repository's existing GitHub Actions job**, after its checkout and Node setup. This example assumes an Ubuntu x64 runner, migrations in `migrations/` and an npm-based Docusaurus site with a lockfile in `docs-site/`. Change those two paths to match your repository. Keep your site's existing Node version and deployment steps.
 
 ```yaml
 - name: Check out the ERD generator
@@ -286,7 +286,7 @@ The following steps belong in the **application/documentation repository's exist
   working-directory: ${{ github.workspace }}
   env:
     PYTHONPATH: ${{ github.workspace }}/.tools/erd-generator
-  run: python -m erd_generator ./db/migration ./docs-site/static/img/schema.svg
+  run: python -m erd_generator ./migrations ./docs-site/static/img/schema.svg
 - name: Build Docusaurus
   working-directory: docs-site
   run: |
@@ -354,11 +354,8 @@ erd_generator/
 tests/
   test_cli.py          # subprocess CLI and import-boundary tests
   integration/        # real pinned D2 rendering; missing D2 is a failure
-  fixtures/           # explicit small SQL/D2 expectations
-scripts/              # reproducible synthetic rendering benchmark
-db/migration/         # sample SQL migrations
-sample_fk_config.yaml # sample additional relationships
-generated/            # ignored generated source, SVG and benchmark output
+  fixtures/           # PostgreSQL setup and relationship-community regressions
+generated/            # ignored generated source, SVG and local reports
 .github/workflows/    # build/test/lint and real ELK checks
 ```
 
@@ -370,27 +367,20 @@ The new explicit loading API is `erd_generator.sql_parser.load_schema_result(pat
 
 ```bash
 python -m pip install -r requirements-dev.txt
-python -m compileall -q erd_generator scripts
+python -m compileall -q erd_generator
 python -m pytest -q -m 'not integration'
 python -m ruff check .
 python -m ruff format --check .
 python -m pytest -q -m integration
-python -m erd_generator ./db/migration ./generated/schema.svg
-python scripts/benchmark_rendering.py --tables 50
-python scripts/benchmark_rendering.py --tables 200
 ```
 
 The `not integration` marker runs fast tests without requiring D2. The `integration` marker requires exactly D2 0.7.1 and bundled ELK; missing dependencies fail rather than skip rendering validation. `python -m ruff format .` formats new/rewritten modules while preserving formatting of untouched legacy files.
 
-The benchmark script separately renders deterministic 50- and 200-table synthetic inputs. Each case writes source, SVG and `metrics.json` under `generated/benchmark-N/`, including duration, peak child-process RSS, output bytes and dimensions. These measurements do not predict every production graph's readability or runtime.
-
-CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint, real rendering and the default command.
+CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint and real rendering, including CLI checks using temporary SQL and YAML inputs. No bundled demonstration database or default generation step is required.
 
 ## Supported SQL and limitations
 
 The parser supports a practical PostgreSQL DDL subset: CREATE TABLE, common ALTER column/constraint/rename operations, DROP TABLE/COLUMN/CONSTRAINT/INDEX, CREATE INDEX (including expression/partial metadata) and ALTER INDEX RENAME. The pinned sqlglot DROP representation is handled explicitly, so removed objects no longer remain in the diagram.
-
-The sample plus YAML has **5 tables, 21 columns, 5 FKs and 7 unique/index records** after all migrations. Both the original inline email UNIQUE and the later explicitly named email UNIQUE remain represented.
 
 CHECK/default changes, partitioning, views, enums, routine execution, search_path resolution and all exotic DDL are not fully modeled. Routine definitions and supported setup statements are ignored as described above; unsupported procedural execution and schema mutations yield diagnostics. Some other constructs are still ignored by the existing parser, so zero diagnostics do not prove complete PostgreSQL interpretation. Quoted identifier normalization and index-expression rewrites retain existing parser limitations.
 
