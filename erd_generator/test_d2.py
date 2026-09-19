@@ -304,3 +304,31 @@ def test_large_connected_graph_groups_automatically_with_an_explicit_rollback():
 def test_invalid_grouping_is_rejected():
     with pytest.raises(ValueError, match="grouping"):
         build_d2(sample_schema(), grouping="unknown")
+
+
+def test_invalid_layout_strategy_is_rejected():
+    with pytest.raises(ValueError, match="strategy"):
+        build_d2(sample_schema(), layout_strategy="unknown")
+
+
+def test_compact_candidate_keeps_business_membership_and_input_unchanged():
+    from copy import deepcopy
+
+    from erd_generator.layout_config import GroupRule, LayoutConfig
+    from tests.integration.test_compact_layout import related_schema
+
+    schema = related_schema()
+    original = deepcopy(schema)
+    config = LayoutConfig((GroupRule("one", tuple(schema), "One"),))
+    baseline = build_d2(schema, layout_config=config)
+    compact = build_d2(schema, layout_config=config, layout_strategy="compact")
+    assert 'label: "One"' in compact
+    assert compact.count("shape: sql_table") == len(schema)
+    assert "_erd_group_0: {" in baseline
+    assert "_erd_group_0: {" not in compact
+    assert schema == original
+    assert compact == build_d2(
+        dict(reversed(list(schema.items()))),
+        layout_config=config,
+        layout_strategy="compact",
+    )

@@ -9,7 +9,7 @@ Outputs are `.d2` source and `.svg` images. D2 + ELK is the only backend.
 - Show tables, columns, data types, keys and relationships.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
-- Infer business groups with matching colours, balance highly connected tables and groups, and use compact connection spacing.
+- Infer business groups with matching colours and automatically compare layouts for spacious diagrams, keeping a more compact result when quality improves.
 
 ## Install
 
@@ -45,6 +45,7 @@ The default uses clean styling, automatic business grouping, compact placement a
 | --- | --- |
 | `--fk-config file.yaml` | Add relationships; see the [YAML format](dev_guide.md#relationships-without-database-fk-constraints). |
 | `--layout-config file.yaml` | Override group membership, titles or colours; see [business layout](dev_guide.md#business-layout). |
+| `--show-references` | Show cross-group target tables and keys beside FK fields, e.g. `FK → books.id`; makes tables wider. |
 | `--direction down` | Lay out related tables from top to bottom. |
 | `--grouping none` | Disable automatic grouping and hub placement. |
 | `--hide-types` | Hide column data types. |
