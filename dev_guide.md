@@ -40,6 +40,7 @@ Quote paths containing spaces. Generated files are overwritten by regeneration; 
 | `--show-types` | Explicitly display SQL column types; already enabled for the short command |
 | `--fk-config PATH` | Add relationships declared in YAML |
 | `--layout-config PATH` | Optional business-group, title and colour overrides; see [business layout](#business-layout) |
+| `--show-references` | Show cross-group target tables and keys beside source FK fields; off by default |
 | `--direction right\|left\|up\|down` | ELK layout direction, default `right`; after grouping, FK arrows can point either way while retaining their actual meaning |
 | `--grouping auto\|none` | Infer business/relationship groups and balance shared hubs, default `auto`; `none` disables those inferences while retaining explicit layout groups and independent component packing |
 | `--d2-binary PATH` | Rendering executable, default `d2`; requires SVG output |
@@ -76,6 +77,23 @@ See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lan
 
 Use `--style classic` to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
 
+### Cross-group reference labels
+
+To read the target of a cross-group FK directly at its source field:
+
+```bash
+python -m erd_generator ./migrations ./generated/schema.svg --show-references
+```
+
+The source row displays, for example, `member_id | BIGINT | FK → members.id`. This also works for source-only `.d2` output and with `--hide-types`. Table names, column names, types, PK/UNQ markers and all actual FK arrows remain intact.
+
+- Only relationships between top-level business or relationship groups are annotated. Inner communities within one business group and self references retain ordinary FK markers. Explicit layout groups still apply with `--grouping none`; without explicit groups, that option leaves no cross-group FKs to annotate.
+- A composite FK labels each source column with its corresponding target column. Multiple external targets on one column are sorted and deduplicated in the marker; the actual constraints and arrows are preserved.
+- Conventional qualified table names omit their schema when the short name is unique across the diagram. Same-named tables retain qualification; unusual identifiers are kept verbatim. Full relationship details remain in table tooltips.
+- Labels use native D2 SQL-table constraint text so D2 includes their width when sizing tables. Floating arrowhead labels are avoided because [D2 does not include them in automatic label placement](https://d2lang.com/tour/connections/).
+
+This improves local reference lookup, not graph compactness: long names or many targets can widen tables and the canvas. It does not hide cross-group lines. The option is therefore off by default. Omit it to restore the original display, or use `show_references=False` in `build_d2()` and `render_optimized()`. No input migration or database rollback is needed. SVG layout comparison preserves the option in both candidates.
+
 ### Compact placement
 
 Disconnected tables and independent relationship groups are packed automatically. No extra command-line option is required:
@@ -92,6 +110,29 @@ The renderer sets ELK's `nodeNodeBetweenLayers=50` and `edgeNodeBetweenLayers=25
 
 Spacing rollback: restore the two renderer flags to `--elk-nodeNodeBetweenLayers=70` and `--elk-edgeNodeBetweenLayers=40`, then regenerate the SVG. D2 source and SQL are unchanged. When rendering D2 source directly, supply the same spacing and padding flags to reproduce the project's SVG placement.
 
+#### Rendered layout comparison
+
+The SVG command can perform **one additional ELK render** when automatic grouping is enabled, there are at least 12 tables, and the first diagram has less than 18% table coverage or an aspect ratio above 2:1. Small diagrams, appendices, disabled automatic grouping and identical candidate sources keep a single render.
+
+The candidate retains business membership, titles, colours and the chosen direction. It removes inner community containers and uses ordinary graph colouring inside groups instead of centering their hubs. These constraints can add unnecessary layers in heavily connected regions. The original layout remains the baseline: simplification is not an unconditional replacement.
+
+A candidate must reduce canvas area by at least 5%, without increasing the longest canvas side, total routed length or longest route. Its aspect ratio must remain within 2:1, or be no more elongated than an already elongated baseline. The orthogonal crossing estimate can increase by at most 5%, with a two-crossing allowance on small counts. Route lengths use SVG path/control points and crossing counts are a proxy; these guards do not prove globally optimal placement or improvement in every aesthetic measure.
+
+Before selection, verification checks tables, column names/types, business membership, overlaps, clipping, connection count and directed field endpoints. The existing self-loop boundary limitation still applies. Candidate render/verification failures retain the successful baseline and produce a warning. If baseline geometry cannot be measured, comparison is skipped with a warning. A failed baseline render preserves the previous SVG. The configured timeout remains per D2 process, so a comparison can roughly double rendering time.
+
+The selected SVG is published **without coordinate editing** together with its matching D2 source. Each file is replaced atomically; a publication error can leave fresh D2 alongside the previous SVG, and the CLI reports failure. Temporary comparison files are removed. Source-only generation stays deterministic and requires no executable; it produces the balanced baseline, which can differ from the source selected during SVG generation. `build_d2(..., layout_strategy="compact")` exposes the candidate for Python callers; it is not a promise that the candidate will be better. The default `"balanced"` strategy preserves the original builder behavior.
+
+To bypass comparison while retaining the baseline grouping, generate `.d2` only and render it with the existing `render_d2` Python function:
+
+```python
+from pathlib import Path
+from erd_generator.d2_renderer import render_d2
+
+render_d2(Path("generated/schema.d2"), Path("generated/schema.svg"))
+```
+
+`--grouping none` also disables comparison along with automatic grouping. No SQL or database rollback is involved.
+
 Migration/rollback: generated D2 for disconnected graphs now nests objects under invisible `_erd_column_*` / `_erd_component_*` containers. Visible SQL names, columns, tooltips and FK meanings remain unchanged, but scripts referencing absolute D2 object paths must account for the new prefixes. Use the generator's SVG command for the configured spacing; invoking D2 manually without the padding flag uses D2's larger default container margins. Reverting the compact-layout change and regenerating restores the earlier flat layout; no SQL migration or database rollback is needed.
 
 ### Business layout
@@ -106,7 +147,7 @@ The deterministic rules are deliberately conservative:
 - Numeric/version-only suffixes do not establish business meaning. Common `t`/`tb`/`tbl`/`table` prefixes are skipped. A rootless wrapper containing multiple eligible subfamilies yields the more specific families; this decision uses that prefix's own subtree, not unrelated table counts.
 - Strong, distributed external relationships can reject a misleading naming family. Repeated constraints, composite-key width and self references do not inflate this evidence. Widely shared hubs are discounted instead of making every named domain appear incoherent.
 - Clear naming can group tables without any FK. Weak or conflicting names fall back to neutral relationship communities and independent-table packing. No business descriptions or foreign keys are invented, and no model/network call is involved.
-- Large named regions retain inferred relationship communities inside them. Only one business level and one inner community level are emitted; all ancestor-level FK endpoints remain outside cross-cell grids.
+- The balanced baseline retains inferred communities inside large named regions. The rendered comparison can select a simpler interior. At most one business level and one inner community level are emitted; all ancestor-level FK endpoints remain outside cross-cell grids.
 
 These are presentation inferences, not business-domain declarations extracted from SQL. `t001`-style names cannot reveal their business meaning. Adding or removing related tables can change inferred membership and geometry; identical input/configuration remains deterministic.
 
@@ -345,11 +386,15 @@ erd_generator/
   layout_config.py     # immutable business overrides and explicit YAML loading
   d2.py                # pure group/region orchestration and D2 source generation
   d2_emit.py           # SQL table, field, connection and container serialization
+  d2_references.py     # cross-group source-field labels and unambiguous target names
   d2_business.py       # name families, override resolution and fallback communities
   d2_layout.py         # size-aware table layers, components and column packing
   d2_grouping.py       # relationship communities, compact layers and shared hubs
   d2_styles.py         # native D2 palette, table and connection presets
   d2_renderer.py       # pinned D2/ELK execution and SVG publication
+  d2_refinement.py     # bounded render comparison and winner publication
+  d2_geometry.py       # read-only SVG measurements and selection guards
+  artifacts.py         # atomic source-file publication
   test_*.py            # unit tests close to implementation
 tests/
   test_cli.py          # subprocess CLI and import-boundary tests
@@ -359,7 +404,9 @@ generated/            # ignored generated source, SVG and local reports
 .github/workflows/    # build/test/lint and real ELK checks
 ```
 
-SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business` and `d2_layout` over shared Schema and normalized relationships; the size-aware layout planner depends on the graph operations in `d2_grouping`, never the reverse. Generation then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
+SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business` and `d2_layout` over shared Schema and normalized relationships; the size-aware layout planner depends on the graph operations in `d2_grouping`, never the reverse. When requested, `d2_references` derives field annotations from the original group partition and validated FKs. Generation then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
+
+For SVG output, CLI calls `d2_refinement`, which coordinates the builder, renderer and `d2_geometry` checks. These lower-level modules never import the coordinator or CLI. Source-only output calls the builder directly. Atomic text publication is shared through `artifacts`.
 
 The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True, style="clean")` and never mutates its input; `style="classic"` preserves the original D2 output style.
 

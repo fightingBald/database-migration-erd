@@ -187,6 +187,35 @@ def test_help_shows_explicit_input_and_output():
     assert "schema.svg" in result.stdout and "schema.d2" in result.stdout
 
 
+@pytest.mark.parametrize(
+    "render", [False, True], ids=["source-only", "missing-renderer"]
+)
+def test_cross_group_reference_option_reaches_generated_source(tmp_path, render):
+    arguments = input_args(tmp_path, suffix="svg" if render else "d2", positional=True)
+    config = tmp_path / "layout.yaml"
+    config.write_text(
+        "groups:\n  parents:\n    tables: [parent]\n  children:\n    tables: [child]\n"
+    )
+    output = tmp_path / "schema.svg"
+    if render:
+        output.write_text("previous SVG")
+        arguments += ["--d2-binary", "/nonexistent/d2"]
+    result = cli(
+        *arguments,
+        "--layout-config",
+        config,
+        "--show-references",
+        env=dict(os.environ, PATH=""),
+    )
+    assert result.returncode == (1 if render else 0), result.stderr
+    assert (
+        '"parent_id": "BIGINT" {constraint: "FK → parent.id"}'
+        in (tmp_path / "schema.d2").read_text()
+    )
+    if render:
+        assert output.read_text() == "previous SVG"
+
+
 def test_business_groups_are_automatic_and_can_be_overridden_without_renderer(tmp_path):
     migrations = tmp_path / "sql"
     migrations.mkdir()

@@ -8,6 +8,7 @@ from .d2_emit import quote_d2 as quote_d2
 from .d2_business import BusinessGroup, plan_groups
 from .d2_grouping import centered_ranks, group_tables
 from .d2_layout import Component, estimate_size, plan_layout, table_ranks
+from .d2_references import FieldReferences, field_references
 from .d2_styles import CLEAN_CONFIG, GRID_GAP, STYLES, GroupPalette, group_palette
 from .layout_config import LayoutConfig
 from .schema import Schema
@@ -54,15 +55,17 @@ def _component_lines(
     style: str,
     direction: str,
     automatic: bool,
+    compact: bool = False,
     metadata: tuple[Relationship, ...] | None = None,
     inherited_palette: GroupPalette | None = None,
+    references: FieldReferences | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     members = set(component.tables)
     metadata = component.relationships if metadata is None else metadata
     groups = tuple(g for g in groups if g.tables[0] in members)
     if len(groups) == 1 and not groups[0].label:
         ranks = (
-            table_ranks(component, schema, show_types, direction)
+            table_ranks(component, schema, show_types, direction, center=not compact)
             if inherited_palette and automatic
             else None
         )
@@ -74,6 +77,7 @@ def _component_lines(
             metadata=metadata,
             palette=inherited_palette,
             ranks=ranks,
+            references=references,
         ), {n: quote_d2(n) for n in members}
     keys = {
         g.key: f"_erd_group_{sha256(g.key.encode()).hexdigest()[:16]}"
@@ -114,7 +118,7 @@ def _component_lines(
                 # groups have no business label, so this recursion is bounded.
                 communities = (
                     group_tables(part.tables, part.relationships)
-                    if automatic
+                    if automatic and not compact
                     else (part.tables,)
                 )
                 return _component_lines(
@@ -128,11 +132,15 @@ def _component_lines(
                     style=style,
                     direction=direction,
                     automatic=automatic,
+                    compact=compact,
                     metadata=metadata,
                     inherited_palette=palette,
+                    references=references,
                 )
             ranks = (
-                table_ranks(part, schema, show_types, direction) if automatic else None
+                table_ranks(part, schema, show_types, direction, center=not compact)
+                if automatic
+                else None
             )
             return diagram_lines(
                 {n: schema[n] for n in part.tables},
@@ -142,6 +150,7 @@ def _component_lines(
                 palette=palette,
                 metadata=metadata,
                 ranks=ranks,
+                references=references,
             ), {n: quote_d2(n) for n in part.tables}
 
         region = Component(group.tables, edges)
@@ -197,6 +206,8 @@ def build_d2(
     style: str = "clean",
     grouping: str = "auto",
     layout_config: LayoutConfig | None = None,
+    layout_strategy: str = "balanced",
+    show_references: bool = False,
 ) -> str:
     if direction not in {"up", "down", "left", "right"}:
         raise ValueError("D2 direction must be up, down, left or right")
@@ -204,6 +215,8 @@ def build_d2(
         raise ValueError("D2 style must be clean or classic")
     if grouping not in {"auto", "none"}:
         raise ValueError("D2 grouping must be auto or none")
+    if layout_strategy not in {"balanced", "compact"}:
+        raise ValueError("D2 layout strategy must be balanced or compact")
     if layout_config is not None and not isinstance(layout_config, LayoutConfig):
         raise ValueError("Layout config: expected a LayoutConfig object")
     result = validate_schema(schema)
@@ -211,6 +224,11 @@ def build_d2(
         raise ValueError("Schema validation failed: " + "; ".join(result.errors))
     groups = plan_groups(
         schema, result.relationships, automatic=grouping == "auto", config=layout_config
+    )
+    references = (
+        field_references(schema, result.relationships, tuple(g.tables for g in groups))
+        if show_references
+        else None
     )
     lines = [
         "# Generated from migrations; edit SQL or FK configuration, then regenerate.",
@@ -241,6 +259,8 @@ def build_d2(
                 style=style,
                 direction=direction,
                 automatic=grouping == "auto",
+                compact=layout_strategy == "compact",
+                references=references,
             )[0],
             direction,
         )

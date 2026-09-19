@@ -1,6 +1,7 @@
 """Pure D2 table, field, connection and container serialization."""
 
 from .d2_styles import CLEAN_CONNECTION, CLEAN_TABLE, GroupPalette
+from .d2_references import FieldReferences
 from .schema import Schema, Table
 from .validation import Relationship, primary_columns
 
@@ -80,8 +81,10 @@ def table_lines(
     show_types: bool,
     style: str,
     palette: GroupPalette | None = None,
+    references: FieldReferences | None = None,
 ) -> list[str]:
     lines = []
+    references = references or {}
     foreign_columns: dict[str, set[str]] = {}
     for fk in relationships:
         foreign_columns.setdefault(fk.table, set()).update(fk.columns)
@@ -100,11 +103,16 @@ def table_lines(
         foreign = foreign_columns.get(name, set())
         unique = _unique_columns(table)
         for column in table.columns:
+            # Native constraint text reserves table space; endpoint labels do not.
+            reference = references.get((name, column.name))
             constraints = [
                 label
                 for label, names in (
                     ("primary_key", primary),
-                    ("foreign_key", foreign),
+                    (
+                        quote_d2(f"FK → {reference}") if reference else "foreign_key",
+                        foreign,
+                    ),
                     ("unique", unique),
                 )
                 if column.name in names
@@ -183,6 +191,7 @@ def diagram_lines(
     metadata: tuple[Relationship, ...] | None = None,
     palette: GroupPalette | None = None,
     ranks: dict[str, int] | None = None,
+    references: FieldReferences | None = None,
 ) -> list[str]:
     return table_lines(
         schema,
@@ -190,6 +199,7 @@ def diagram_lines(
         show_types=show_types,
         style=style,
         palette=palette,
+        references=references,
     ) + relationship_lines(relationships, style=style, ranks=ranks)
 
 

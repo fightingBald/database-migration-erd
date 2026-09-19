@@ -91,7 +91,12 @@ def _table_size(table: Table, show_types: bool) -> tuple[int, int]:
 
 
 def table_ranks(
-    component: Component, schema: Schema, show_types: bool, direction: str
+    component: Component,
+    schema: Schema,
+    show_types: bool,
+    direction: str,
+    *,
+    center: bool = True,
 ) -> dict[str, int]:
     """Center dominant tables only when estimated area and proportions improve.
 
@@ -101,6 +106,8 @@ def table_ranks(
     names = component.tables
     pairs = tuple((f.table, f.ref_table) for f in component.relationships)
     original = layout_ranks(names, pairs)
+    if not center:
+        return original
     neighbors = {n: set() for n in names}
     for a, b in pairs:
         if a != b:

@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .d2_renderer import D2RenderConfig, D2RenderError, render_d2
+from .artifacts import write_text_atomic as _write_source
+from .d2_renderer import D2RenderConfig, D2RenderError
 from .d2_styles import STYLES
 from .diagnostics import ParseFailure
 from .fk_config import apply_foreign_key_config, load_foreign_key_config
@@ -98,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional YAML overrides for business groups, titles and colours",
     )
     d2.add_argument(
+        "--show-references",
+        action="store_true",
+        help="Label cross-group target tables and keys beside source FK fields",
+    )
+    d2.add_argument(
         "--render", choices=["svg"], help="Also render a same-stem SVG with ELK"
     )
     d2.add_argument("--d2-binary", help="D2 executable (render only; default: d2)")
@@ -167,25 +172,6 @@ def _write_failure_log(failures: list[ParseFailure], log_root: str | None) -> No
     LOGGER.info("Parse diagnostics written to %s", output)
 
 
-def _write_source(output: Path, text: str) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=output.parent,
-            prefix=f".{output.name}.",
-            delete=False,
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(text)
-        temporary.replace(output)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
 def run_cli(args: argparse.Namespace) -> int:
     written_source: Path | None = None
     try:
@@ -230,16 +216,21 @@ def run_cli(args: argparse.Namespace) -> int:
             style=args.style,
             grouping=args.grouping,
             layout_config=layout_config,
+            show_references=args.show_references,
         )
         LOGGER.info(
-            "D2 layout: grouping=%s layout_overrides=%d",
+            "D2 layout: grouping=%s layout_overrides=%d reference_labels=%s",
             args.grouping,
             len(layout_config.groups) if layout_config else 0,
+            args.show_references,
         )
         _write_source(source_output, source)
         written_source = source_output
         if args.render:
-            render_d2(
+            from .d2_refinement import render_optimized
+
+            render_optimized(
+                schema,
                 source_output,
                 svg_output,
                 D2RenderConfig(
@@ -249,6 +240,12 @@ def run_cli(args: argparse.Namespace) -> int:
                     else 120,
                     force_appendix=args.force_appendix,
                 ),
+                show_types=args.show_types,
+                direction=args.direction,
+                style=args.style,
+                grouping=args.grouping,
+                layout_config=layout_config,
+                show_references=args.show_references,
             )
         LOGGER.info(
             "ERD generated: tables=%d columns=%d foreign_keys=%d",
