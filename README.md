@@ -9,7 +9,7 @@ Outputs are `.d2` source and `.svg` images. D2 + ELK is the only backend.
 - Show tables, columns, data types, keys and relationships.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
-- Infer business groups, use group names as titles with matching colours, and balance highly connected tables and groups for more compact diagrams.
+- Infer business groups with matching colours, balance highly connected tables and groups, and use compact connection spacing.
 
 ## Install
 

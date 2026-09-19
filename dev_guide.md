@@ -88,13 +88,17 @@ Disconnected tables and independent relationship groups are packed automatically
 
 Size estimates guide packing; they are not a guaranteed canvas ratio. A single large connected graph, exceptionally long labels or one very tall table can still make a wide/tall diagram. A connected graph is not split into grid cells just to meet an aspect ratio. `--direction` controls the ELK layout axis, and `--style classic` changes appearance while keeping automatic packing.
 
+The renderer sets ELK's `nodeNodeBetweenLayers=50` and `edgeNodeBetweenLayers=25`, with container padding 16 and self-loop spacing 100. This reduces routing space without changing grouping, fonts, columns or FK endpoints and requires no additional renders. Comparative integration tests render the same D2 source with the previous 70/40 spacing and check area, routed lengths, overlaps and field endpoints across isolated, chain, star, community, composite-cycle and library graphs in both horizontal and vertical directions. Route lengths are estimates from SVG path/control points, not exact curve lengths. Smaller area alone does not establish a better layout; long routes, crossings and readability must also be reviewed.
+
+Spacing rollback: restore the two renderer flags to `--elk-nodeNodeBetweenLayers=70` and `--elk-edgeNodeBetweenLayers=40`, then regenerate the SVG. D2 source and SQL are unchanged. When rendering D2 source directly, supply the same spacing and padding flags to reproduce the project's SVG placement.
+
 Migration/rollback: generated D2 for disconnected graphs now nests objects under invisible `_erd_column_*` / `_erd_component_*` containers. Visible SQL names, columns, tooltips and FK meanings remain unchanged, but scripts referencing absolute D2 object paths must account for the new prefixes. Use the generator's SVG command for the configured spacing; invoking D2 manually without the padding flag uses D2's larger default container margins. Reverting the compact-layout change and regenerating restores the earlier flat layout; no SQL migration or database rollback is needed.
 
 ### Business layout
 
 All bundled examples use a fictional library. Example schemas, roles, table names and relationships are synthetic; use the `demo_library` namespace for new examples. Keep real customer/company SQL, identifiers, local paths and generated diagrams out of fixtures and documentation. Generate example diagrams from the checked-in synthetic SQL.
 
-Automatic business grouping needs no YAML or additional command options. Repeated word prefixes such as `books_*`, `loans_*` and `members_*` can produce named regions with a title, subtle background, matching table headers and a table count. Namespace-qualified titles distinguish the same family in different schemas. Colours are derived from stable group identifiers, so unrelated groups do not rotate the palette. Titles also identify groups when colours are similar.
+Automatic business grouping needs no YAML or additional command options. Repeated word prefixes such as `books_*`, `loans_*` and `members_*` can produce named regions with a title, subtle background and matching table headers. Namespace-qualified titles distinguish the same family in different schemas. Colours are derived from stable group identifiers, so unrelated groups do not rotate the palette. Titles also identify groups when colours are similar.
 
 The deterministic rules are deliberately conservative:
 

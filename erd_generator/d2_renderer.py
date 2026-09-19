@@ -100,6 +100,8 @@ def render_d2(
                 "--layout",
                 "elk",
                 "--elk-nodeSelfLoop=100",
+                "--elk-nodeNodeBetweenLayers=50",
+                "--elk-edgeNodeBetweenLayers=25",
                 f"--elk-padding=[top={COMPONENT_PADDING},left={COMPONENT_PADDING},"
                 f"bottom={COMPONENT_PADDING},right={COMPONENT_PADDING}]",
                 "--watch=false",
