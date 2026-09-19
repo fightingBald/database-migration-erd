@@ -19,13 +19,23 @@ def cli(*args, env=None):
     )
 
 
-def sample_args(tmp_path, suffix="d2", *, positional=False):
+def input_args(tmp_path, suffix="d2", *, positional=False):
+    migrations = tmp_path / "input" / "migrations"
+    migrations.mkdir(parents=True, exist_ok=True)
+    (migrations / "V1.sql").write_text(
+        "CREATE TABLE parent (id BIGINT PRIMARY KEY);\n"
+        "CREATE TABLE child (id BIGINT PRIMARY KEY, parent_id BIGINT);\n"
+        "CREATE TABLE obsolete (id INT);\n"
+    )
+    (migrations / "V2.sql").write_text("DROP TABLE obsolete;\n")
+    config = migrations.parent / "fk.yaml"
+    config.write_text("child:\n  fks:\n    - [parent_id, parent, id]\n")
     paths = (
-        [ROOT / "db/migration", tmp_path / f"schema.{suffix}"]
+        [migrations, tmp_path / f"schema.{suffix}"]
         if positional
         else [
             "--migrations",
-            ROOT / "db/migration",
+            migrations,
             "--out",
             tmp_path / f"schema.{suffix}",
         ]
@@ -33,22 +43,23 @@ def sample_args(tmp_path, suffix="d2", *, positional=False):
     return [
         *paths,
         "--fk-config",
-        ROOT / "sample_fk_config.yaml",
+        config,
         "--log-dir",
         tmp_path,
     ]
 
 
 def test_default_entrypoint_generates_d2_without_starting_renderer(tmp_path):
-    result = cli(*sample_args(tmp_path), "--d2-binary", "/nonexistent/d2")
+    result = cli(*input_args(tmp_path), "--d2-binary", "/nonexistent/d2")
     # A renderer-only flag must not be silently ignored in source-only mode.
     assert result.returncode == 2
-    result = cli(*sample_args(tmp_path))
+    result = cli(*input_args(tmp_path))
     assert result.returncode == 0, result.stderr
     source = (tmp_path / "schema.d2").read_text()
     assert "layout-engine: elk" in source
-    assert source.count("shape: sql_table") == 5
-    assert "temp_audit" not in source
+    assert source.count("shape: sql_table") == 2
+    assert "obsolete" not in source
+    assert '"child"."parent_id" -> "parent"."id"' in source
     assert '"id": ""' in source
     assert not (tmp_path / "schema.svg").exists()
 
@@ -65,7 +76,7 @@ def simple_migrations(tmp_path):
     return migrations
 
 
-def test_positional_d2_has_types_without_renderer_or_sample_config(
+def test_positional_d2_has_types_without_renderer_or_implicit_config(
     tmp_path, simple_migrations
 ):
     output = tmp_path / "输出 图" / "schema.d2"
@@ -233,7 +244,7 @@ def test_invalid_layout_configuration_preserves_both_outputs(
 
 
 def test_clean_style_is_default_and_classic_can_be_selected(tmp_path):
-    args = sample_args(tmp_path)
+    args = input_args(tmp_path)
     result = cli(*args)
     assert result.returncode == 0, result.stderr
     source = tmp_path / "schema.d2"
@@ -241,7 +252,7 @@ def test_clean_style_is_default_and_classic_can_be_selected(tmp_path):
     result = cli(*args, "--style", "classic")
     assert result.returncode == 0, result.stderr
     assert "theme-overrides:" not in source.read_text()
-    assert source.read_text().count("shape: sql_table") == 5
+    assert source.read_text().count("shape: sql_table") == 2
 
 
 def test_grouping_can_be_disabled_without_changing_the_default_command(tmp_path):
@@ -272,13 +283,13 @@ def test_grouping_can_be_disabled_without_changing_the_default_command(tmp_path)
     ],
 )
 def test_invalid_d2_options_fail_before_writing(tmp_path, options, positional):
-    result = cli(*sample_args(tmp_path, positional=positional), *options)
+    result = cli(*input_args(tmp_path, positional=positional), *options)
     assert result.returncode == 2
     assert not (tmp_path / "schema.d2").exists()
 
 
 def test_mismatched_extension_rejected(tmp_path):
-    result = cli(*sample_args(tmp_path, "drawio"))
+    result = cli(*input_args(tmp_path, "drawio"))
     assert result.returncode == 2
     assert not (tmp_path / "schema.drawio").exists()
 
@@ -312,7 +323,7 @@ def test_detected_parse_failure_cannot_overwrite_good_source(tmp_path, positiona
 def test_missing_renderer_preserves_old_svg(tmp_path):
     (tmp_path / "schema.svg").write_text("old svg", encoding="utf-8")
     result = cli(
-        *sample_args(tmp_path), "--render", "svg", "--d2-binary", "/nonexistent/d2"
+        *input_args(tmp_path), "--render", "svg", "--d2-binary", "/nonexistent/d2"
     )
     assert result.returncode == 1
     assert (tmp_path / "schema.d2").is_file()
@@ -325,7 +336,7 @@ def test_unknown_fk_config_prevents_partial_diagram(tmp_path):
     config.write_text(
         "missing: {fks: [[id, demo_library.members, id]]}", encoding="utf-8"
     )
-    result = cli(*sample_args(tmp_path), "--fk-config", config)
+    result = cli(*input_args(tmp_path), "--fk-config", config)
     assert result.returncode == 1
     assert not (tmp_path / "schema.d2").exists()
 
@@ -416,7 +427,7 @@ def test_unsupported_postgres_input_preserves_both_outputs(tmp_path, body, reaso
 def test_output_directory_is_not_writable_file(tmp_path):
     parent = tmp_path / "blocked"
     parent.write_text("file", encoding="utf-8")
-    result = cli(*sample_args(tmp_path), "--out", parent / "schema.d2")
+    result = cli(*input_args(tmp_path), "--out", parent / "schema.d2")
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
 
@@ -438,7 +449,7 @@ def test_removed_backend_options_fail_without_replacing_outputs(tmp_path, option
     source, image = tmp_path / "schema.d2", tmp_path / "schema.svg"
     source.write_text("old source")
     image.write_text("old image")
-    result = cli(*sample_args(tmp_path), *options)
+    result = cli(*input_args(tmp_path), *options)
     assert result.returncode == 2
     assert "unrecognized arguments" in result.stderr
     assert source.read_text() == "old source"
@@ -454,7 +465,7 @@ def test_python_entrypoint_uses_same_d2_workflow_as_module_cli(tmp_path):
         main,
     )
 
-    arguments = sample_args(tmp_path, positional=True)
+    arguments = input_args(tmp_path, positional=True)
     assert main(list(map(str, arguments))) == 0
     source = tmp_path / "schema.d2"
     expected = source.read_bytes()

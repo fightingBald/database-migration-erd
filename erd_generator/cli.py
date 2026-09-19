@@ -26,8 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  %(prog)s ./db/migration ./generated/schema.svg\n"
-            "  %(prog)s ./db/migration ./generated/schema.d2\n\n"
+            "  %(prog)s ./migrations ./generated/schema.svg\n"
+            "  %(prog)s ./migrations ./generated/schema.d2\n\n"
             "SVG output also writes same-stem D2 source. D2 output alone does not\n"
             "require the D2 executable. Short-form defaults: types shown, clean\n"
             "style, ELK layout. Named paths: --migrations SQL_DIR --out OUTPUT."

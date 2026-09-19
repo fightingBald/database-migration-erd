@@ -1,15 +1,8 @@
 """Regression tests use expected SQL semantics, not rendered snapshots."""
 
-from pathlib import Path
-
 import pytest
 
-from erd_generator.fk_config import apply_foreign_key_config, load_foreign_key_config
-from erd_generator.sql_parser import (
-    get_last_parse_failures,
-    load_schema_from_migrations,
-    parse_schema_from_sql,
-)
+from erd_generator.sql_parser import parse_schema_from_sql
 
 
 def parse(sql):
@@ -159,36 +152,13 @@ def test_index_method_and_expression_metadata():
     assert index.where == "email IS NOT NULL"
 
 
-def test_sample_migrations_have_expected_final_schema():
-    root = Path(__file__).resolve().parents[1]
-    schema = load_schema_from_migrations(str(root / "db/migration"))
-    failures = get_last_parse_failures()
-    entries, source = load_foreign_key_config(
-        str(root / "sample_fk_config.yaml"), failures
-    )
-    apply_foreign_key_config(schema, entries, config_source=source)
-    assert not failures
-    assert set(schema) == {
-        "demo_library.members",
-        "demo_library.loans",
-        "demo_library.books",
-        "demo_library.loan_items",
-        "demo_library.membership_types",
-    }
-    assert sum(len(t.columns) for t in schema.values()) == 21
-    assert sum(len(t.foreign_keys) for t in schema.values()) == 5
-    # The original inline email UNIQUE and the later named UNIQUE both remain.
-    assert sum(len(t.indexes) for t in schema.values()) == 7
-    assert [i.name for i in schema["demo_library.members"].indexes] == [
-        "",
-        "members_email_unique",
-        "members_email_status_unique",
-        "idx_members_active_email",
-        "idx_members_lower_email",
-    ]
-    assert schema["demo_library.members"].get_column("last_visit") is None
-    assert schema["demo_library.loans"].get_column("loan_label") is None
-    assert schema["demo_library.members"].get_column("status").nullable is False
+def test_inline_and_later_named_unique_constraints_are_both_retained():
+    table = parse("""
+        CREATE TABLE a (email TEXT UNIQUE);
+        ALTER TABLE a ADD CONSTRAINT email_unique UNIQUE (email);
+    """)["a"]
+    assert [index.name for index in table.indexes] == ["", "email_unique"]
+    assert all(index.unique and index.columns == ("EMAIL",) for index in table.indexes)
 
 
 def test_malformed_sql_records_failure():

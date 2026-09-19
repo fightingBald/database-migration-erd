@@ -33,5 +33,5 @@ jobs:
           echo "$RUNNER_TEMP/d2-v0.7.1/bin" >> "$GITHUB_PATH"
       - name: Build, fast tests and lint
         run: make build test lint PYTHON=python
-      - name: Verify real ELK rendering and default workflow
-        run: make test-integration run PYTHON=python
+      - name: Verify real ELK rendering and CLI with temporary test inputs
+        run: make test-integration PYTHON=python

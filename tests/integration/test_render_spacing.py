@@ -1,7 +1,6 @@
 """Compare compact routing with the previous ELK spacing across graph shapes."""
 
 import os
-from pathlib import Path
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -10,7 +9,6 @@ import pytest
 from erd_generator.d2 import build_d2
 from erd_generator.d2_renderer import render_d2
 from erd_generator.schema import ForeignKey
-from erd_generator.sql_parser import parse_schema_from_sql
 from tests.integration.test_business_layout import business_schema
 from tests.integration.test_compact_layout import (
     arrow_routes,
@@ -29,11 +27,6 @@ def scenario(shape):
         return related_schema()
     if shape == "composite_cycles":
         return business_schema()
-    if shape == "library":
-        schema = {}
-        fixture = Path(__file__).resolve().parents[1] / "fixtures/library_30_tables.sql"
-        parse_schema_from_sql(fixture.read_text(), schema)
-        return schema
     names = tuple(f"demo_library.t{i:02}" for i in range(18))
     schema = {n: table(n, 3 + i % 7) for i, n in enumerate(names)}
     if shape != "isolated":
@@ -44,7 +37,7 @@ def scenario(shape):
 
 
 @pytest.mark.parametrize(
-    "shape", ["isolated", "chain", "star", "communities", "composite_cycles", "library"]
+    "shape", ["isolated", "chain", "star", "communities", "composite_cycles"]
 )
 @pytest.mark.parametrize("direction", ["right", "down"])
 def test_spacing_reduces_routes_without_losing_fields(tmp_path, shape, direction):

@@ -14,3 +14,12 @@ parse_log/
 # Local planning and validation notes; excluded from the public repository.
 /docs/plans/
 /docs/validation/
+
+# Local SQL inputs and retired demonstration assets.
+/migrations/
+/db/migration/
+/sample_fk_config.yaml
+/scripts/benchmark_rendering.py
+/tests/fixtures/library_30_tables.sql
+/tests/fixtures/simple.sql
+/tests/fixtures/simple.d2

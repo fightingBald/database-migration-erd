@@ -1,9 +1,0 @@
-demo_library.members:
-  fks:
-    - [membership_type_id, demo_library.membership_types, id]
-    - [sponsor_id, demo_library.members, id]
-
-demo_library.loan_items:
-  fks:
-    - [loan_id, demo_library.loans, id]
-    - [book_id, demo_library.books, id]
