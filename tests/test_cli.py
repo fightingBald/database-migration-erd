@@ -469,8 +469,6 @@ def test_output_directory_is_not_writable_file(tmp_path):
     [
         ["--format", "d2"],
         ["--format", "drawio"],
-        ["--layout", "elk"],
-        ["--layout", "grid"],
         ["--per-row", "2"],
         ["--graphviz-prog", "dot"],
         ["--graphviz-scale", "1"],
@@ -486,6 +484,17 @@ def test_removed_backend_options_fail_without_replacing_outputs(tmp_path, option
     assert "unrecognized arguments" in result.stderr
     assert source.read_text() == "old source"
     assert image.read_text() == "old image"
+
+
+@pytest.mark.parametrize("engine", ["grid", "dagre"])
+def test_unsupported_layout_does_not_replace_outputs(tmp_path, engine):
+    source, image = tmp_path / "schema.d2", tmp_path / "schema.svg"
+    source.write_text("old source")
+    image.write_text("old image")
+    result = cli(*input_args(tmp_path), "--layout", engine)
+    assert result.returncode == 2
+    assert "invalid choice" in result.stderr
+    assert source.read_text() == "old source" and image.read_text() == "old image"
 
 
 def test_python_entrypoint_uses_same_d2_workflow_as_module_cli(tmp_path):
@@ -593,3 +602,26 @@ def test_codegen_rejects_ambiguous_directions_without_replacing_formal_output(tm
     assert "002.sql:3" in result.stderr and "more than one Up" in result.stderr
     preview = (tmp_path / "schema.partial.d2").read_text()
     assert "INCOMPLETE" in preview and "untrusted" not in preview
+
+
+@pytest.mark.parametrize("engine", ["elk", "tala"])
+def test_layout_option_works_for_source_only_without_plugin(tmp_path, engine):
+    result = cli(*input_args(tmp_path, positional=True), "--layout", engine)
+    assert result.returncode == 0, result.stderr
+    source = (tmp_path / "schema.d2").read_text()
+    assert f"layout-engine: {engine}" in source
+    assert '"child"."parent_id" -> "parent"."id"' in source
+
+
+def test_partial_source_preserves_requested_tala_layout(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001.sql").write_text(
+        "CREATE TABLE books(id int); CREATE INDEX ix ON missing(id);"
+    )
+    result = cli(
+        migrations, tmp_path / "schema.d2", "--layout", "tala", "--log-dir", tmp_path
+    )
+    assert result.returncode == 1
+    source = (tmp_path / "schema.partial.d2").read_text()
+    assert "layout-engine: tala" in source and "INCOMPLETE" in source

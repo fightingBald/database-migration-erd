@@ -1,5 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
+import re
 
 import pytest
 
@@ -34,6 +35,103 @@ def sample_schema():
             ],
         ),
     }
+
+
+@pytest.mark.parametrize("packed", [False, True])
+@pytest.mark.parametrize("mode", ["ordered", "paired"])
+@pytest.mark.parametrize("engine", ["elk", "tala"])
+def test_cluster_candidates_are_deterministic_and_preserve_schema(packed, mode, engine):
+    schema = sample_schema()
+    schema["other"] = Table(
+        "other",
+        columns=[Column("id", "INT")],
+        foreign_keys=[ForeignKey(("id",), "public.parent", ("id",))],
+    )
+    if packed:
+        schema["isolated"] = Table("isolated", columns=[Column("id", "INT")])
+    config = LayoutConfig(tuple(GroupRule(n, (n,)) for n in schema))
+    before = deepcopy(schema)
+    options = dict(layout_config=config, layout_engine=engine)
+    baseline = build_d2(schema, **options)
+    candidate = build_d2(schema, cluster_affinity=mode, **options)
+    assert candidate.count(" -> ") + candidate.count(" <- ") == baseline.count(
+        " -> "
+    ) + baseline.count(" <- ")
+    assert candidate.count("shape: sql_table") == len(schema)
+    assert candidate == build_d2(
+        dict(reversed(list(schema.items()))), cluster_affinity=mode, **options
+    )
+    assert build_d2(
+        schema, grouping="none", cluster_affinity=mode, **options
+    ) == build_d2(schema, grouping="none", **options)
+    assert schema == before
+
+
+def test_elk_affinity_only_reorders_top_level_cluster_ranks(monkeypatch):
+    from erd_generator import d2
+
+    schema = sample_schema()
+    config = LayoutConfig(tuple(GroupRule(n, (n,)) for n in schema))
+    calls = []
+
+    def reorder(ranks, weights):
+        calls.append((ranks, weights))
+        return ranks
+
+    monkeypatch.setattr(d2, "affinity_ranks", reorder)
+    options = dict(layout_config=config)
+    assert build_d2(schema, cluster_affinity="ordered", **options) == build_d2(
+        schema, **options
+    )
+    assert len(calls) == 2  # Declaration order and ELK layer order, only at the root.
+    assert all(
+        len(ranks) == 2 and list(weights.values()) == [1] for ranks, weights in calls
+    )
+
+
+def test_invalid_affinity_mode_fails_before_source_generation():
+    with pytest.raises(ValueError, match="cluster affinity"):
+        build_d2(sample_schema(), cluster_affinity="unknown")
+
+
+@pytest.mark.parametrize("engine", ["elk", "tala"])
+def test_affinity_order_places_strong_pairs_next_in_declarations(engine):
+    schema = {
+        n: Table(n, columns=[Column(c, "INT") for c in ("id", "ref1", "ref2")])
+        for n in "abcd"
+    }
+    for a, b in (("a", "c"), ("b", "d")):
+        schema[a].foreign_keys.extend(
+            ForeignKey((c,), b, ("id",)) for c in ("ref1", "ref2")
+        )
+    schema["a"].foreign_keys.append(ForeignKey(("id",), "b", ("id",)))
+    config = LayoutConfig(tuple(GroupRule(n, (n,)) for n in schema))
+    source = build_d2(
+        schema, layout_engine=engine, layout_config=config, cluster_affinity="ordered"
+    )
+    order = re.findall(r'^  label: "([abcd])"$', source, re.MULTILINE)
+    assert abs(order.index("a") - order.index("c")) == 1
+    assert abs(order.index("b") - order.index("d")) == 1
+    assert source.count("shape: sql_table") == 4
+
+
+@pytest.mark.parametrize("engine", ["elk", "tala"])
+def test_nested_affinity_preserves_business_regions_and_rewrites_field_paths(engine):
+    schema = sample_schema()
+    config = LayoutConfig(tuple(GroupRule(n, (n,)) for n in schema))
+    source = build_d2(
+        schema, layout_engine=engine, layout_config=config, cluster_affinity="paired"
+    )
+    assert '_erd_pair_0: {\n  label: ""' in source
+    assert source.count("shape: sql_table") == 2
+    assert source.count("label.near: top-left") == 2
+    arrows = [
+        line
+        for line in source.splitlines()
+        if re.match(r"_erd_pair_0\..+ (?:->|<-) ", line)
+    ]
+    assert len(arrows) == 2
+    assert all(line.count("_erd_pair_0.") == 2 for line in arrows)
 
 
 def test_automatic_business_regions_have_labels_and_colours_without_configuration():
@@ -92,6 +190,24 @@ def test_sql_tables_and_composite_foreign_key_groups():
         '"public.child"."parent_id" -> "public.parent"."id": "fk_parent [2/2]"'
         in source
     )
+
+
+@pytest.mark.parametrize("engine", ["elk", "tala"])
+def test_layout_engine_is_embedded_without_changing_schema_semantics(engine):
+    schema = sample_schema()
+    before = deepcopy(schema)
+    source = build_d2(schema, layout_engine=engine, show_types=True)
+    assert f"layout-engine: {engine}" in source
+    assert source.count("shape: sql_table") == 2
+    assert '"public.child"."tenant" -> "public.parent"."tenant"' in source
+    assert '"public.child"."parent_id" -> "public.parent"."id"' in source
+    assert schema == before
+
+
+@pytest.mark.parametrize("engine", ["dagre", "tala\nx -> y", ""])
+def test_invalid_layout_engine_is_rejected_before_source_generation(engine):
+    with pytest.raises(ValueError, match="layout engine"):
+        build_d2(sample_schema(), layout_engine=engine)
 
 
 def test_no_types_and_isolated_empty_table():
@@ -299,6 +415,18 @@ def test_large_connected_graph_groups_automatically_with_an_explicit_rollback():
     assert flat.count("shape: sql_table") == 40
     assert " <- " not in flat
     assert schema == before
+
+
+def test_tala_retains_automatic_groups_without_elk_arrow_reordering():
+    schema = {}
+    fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/related_tables.sql"
+    parse_schema_from_sql(fixture.read_text(), schema)
+    elk = build_d2(schema)
+    tala = build_d2(schema, layout_engine="tala")
+    assert " <- " in elk and " <- " not in tala
+    assert tala.count('  label: ""') == elk.count('  label: ""')
+    assert tala.count("shape: sql_table") == len(schema)
+    assert tala == build_d2(dict(reversed(list(schema.items()))), layout_engine="tala")
 
 
 def test_invalid_grouping_is_rejected():

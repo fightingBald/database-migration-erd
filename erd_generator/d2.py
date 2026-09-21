@@ -1,10 +1,12 @@
-"""Pure D2 SQL-table source generation with ELK and component packing."""
+"""Pure D2 SQL-table source generation with grouping and component packing."""
 
 from collections.abc import Callable
 from hashlib import sha256
 
+from .d2_affinity import affinity_ranks, cluster_pairs, group_weights
 from .d2_emit import container_lines, diagram_lines, relationship_lines, table_path
 from .d2_emit import quote_d2 as quote_d2
+from .d2_engines import validate_layout_engine
 from .d2_business import BusinessGroup, plan_groups
 from .d2_grouping import centered_ranks, group_tables
 from .d2_layout import Component, estimate_size, plan_layout, table_ranks
@@ -56,10 +58,12 @@ def _component_lines(
     style: str,
     direction: str,
     automatic: bool,
+    layered: bool,
     compact: bool = False,
     metadata: tuple[Relationship, ...] | None = None,
     inherited_palette: GroupPalette | None = None,
     references: FieldReferences | None = None,
+    cluster_affinity: str = "none",
 ) -> tuple[list[str], dict[str, str]]:
     members = set(component.tables)
     metadata = component.relationships if metadata is None else metadata
@@ -74,7 +78,7 @@ def _component_lines(
                 center=not compact,
                 show_indexes=show_indexes,
             )
-            if inherited_palette and automatic
+            if inherited_palette and automatic and layered
             else None
         )
         return diagram_lines(
@@ -102,6 +106,9 @@ def _component_lines(
             internal[owners[fk.table]].append(fk)
         else:
             external.append(fk)
+    affinity = (
+        group_weights(owners, tuple(external)) if cluster_affinity != "none" else {}
+    )
     # Include ancestor-level edges: a nested subcommunity with an external
     # field reference must also remain outside grid cells.
     linked = {
@@ -111,7 +118,7 @@ def _component_lines(
         if n in owners and owners.get(other) != owners[n]
     }
     weights = {}
-    lines = []
+    bodies = {}
     paths = {}
     for group in groups:
         key = keys[group.key]
@@ -142,6 +149,7 @@ def _component_lines(
                     style=style,
                     direction=direction,
                     automatic=automatic,
+                    layered=layered,
                     compact=compact,
                     metadata=metadata,
                     inherited_palette=palette,
@@ -156,7 +164,7 @@ def _component_lines(
                     center=not compact,
                     show_indexes=show_indexes,
                 )
-                if automatic
+                if automatic and layered
                 else None
             )
             return diagram_lines(
@@ -173,7 +181,7 @@ def _component_lines(
 
         region = Component(group.tables, edges)
         # Grid boundaries are safe only when no external FK enters a cell.
-        # A business group with external edges must remain a native ELK region,
+        # A business group with external edges must remain a native layout region,
         # including any of its tables which have no internal relationship.
         if key in linked:
             body, local_paths = emit(region)
@@ -196,11 +204,22 @@ def _component_lines(
             region, schema, show_types, direction, show_indexes=show_indexes
         )
         weights[key] = size[1 if direction in {"right", "left"} else 0]
-        lines.extend(
-            container_lines(
-                key, body, label=group.label, palette=palette if group.label else None
-            )
+        bodies[key] = container_lines(
+            key, body, label=group.label, palette=palette if group.label else None
         )
+    lines = []
+    if cluster_affinity == "paired":
+        for i, (child, anchor) in enumerate(cluster_pairs(affinity).items()):
+            key = f"_erd_pair_{i}"
+            lines.extend(container_lines(key, bodies.pop(anchor) + bodies.pop(child)))
+            for name in paths:
+                if owners[name] in {anchor, child}:
+                    paths[name] = f"{key}.{paths[name]}"
+    order = {key: i for i, key in enumerate(bodies)}
+    if cluster_affinity == "ordered":
+        order = affinity_ranks(order, affinity)
+    for key in sorted(bodies, key=lambda key: order[key]):
+        lines.extend(bodies[key])
     ranks = (
         centered_ranks(
             tuple(sorted(internal)),
@@ -208,9 +227,11 @@ def _component_lines(
             hubs=tuple(keys[g.key] for g in groups if len(g.tables) == 1),
             weights=weights,
         )
-        if automatic
+        if automatic and layered
         else None
     )
+    if ranks and cluster_affinity == "ordered":
+        ranks = affinity_ranks(ranks, affinity)
     lines.extend(
         relationship_lines(
             tuple(external),
@@ -235,7 +256,10 @@ def build_d2(
     layout_strategy: str = "balanced",
     show_references: bool = False,
     show_indexes: bool = True,
+    layout_engine: str = "elk",
+    cluster_affinity: str = "none",
 ) -> str:
+    validate_layout_engine(layout_engine)
     if direction not in {"up", "down", "left", "right"}:
         raise ValueError("D2 direction must be up, down, left or right")
     if style not in STYLES:
@@ -244,6 +268,8 @@ def build_d2(
         raise ValueError("D2 grouping must be auto or none")
     if layout_strategy not in {"balanced", "compact"}:
         raise ValueError("D2 layout strategy must be balanced or compact")
+    if cluster_affinity not in {"none", "ordered", "paired"}:
+        raise ValueError("D2 cluster affinity must be none, ordered or paired")
     if layout_config is not None and not isinstance(layout_config, LayoutConfig):
         raise ValueError("Layout config: expected a LayoutConfig object")
     result = validate_schema(schema)
@@ -261,7 +287,7 @@ def build_d2(
         "# Generated from migrations; edit SQL or FK configuration, then regenerate.",
         "vars: {",
         "  d2-config: {",
-        "    layout-engine: elk",
+        f"    layout-engine: {layout_engine}",
         *(CLEAN_CONFIG if style == "clean" else ()),
         "  }",
         "}",
@@ -288,8 +314,10 @@ def build_d2(
                 style=style,
                 direction=direction,
                 automatic=grouping == "auto",
+                layered=layout_engine == "elk",
                 compact=layout_strategy == "compact",
                 references=references,
+                cluster_affinity=cluster_affinity if grouping == "auto" else "none",
             )[0],
             direction,
         )

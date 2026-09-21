@@ -1,6 +1,9 @@
 [tool.pytest.ini_options]
 testpaths = ["erd_generator", "tests"]
-markers = ["integration: requires the pinned D2 executable"]
+markers = [
+    "integration: requires the pinned D2 executable",
+    "tala: optional rendering tests requiring d2plugin-tala on PATH",
+]
 addopts = "--strict-markers"
 
 [tool.ruff]

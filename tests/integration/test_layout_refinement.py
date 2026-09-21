@@ -6,7 +6,7 @@ import pytest
 
 from erd_generator import d2_refinement
 from erd_generator.d2 import build_d2
-from erd_generator.d2_geometry import improves_layout, measure_layout
+from erd_generator.d2_geometry import improves_affinity, improves_layout, measure_layout
 from erd_generator.d2_renderer import render_d2
 from tests.integration.test_business_layout import assert_named_regions, business_schema
 from tests.integration.test_compact_layout import (
@@ -82,8 +82,21 @@ def verify_refinement(
     selected = d2_refinement.render_optimized(schema, source, image, **options)
     winner = source.read_text()
     assert image.read_bytes() == native[winner]
-    assert 1 <= len(native) <= 2
-    if selected == "compact":
+    assert 1 <= len(native) <= 4
+    compact = build_d2(schema, **options, layout_strategy="compact")
+    previous = (
+        compact
+        if compact in measurements
+        and improves_layout(measurements[compact], measurements[original])
+        else original
+    )
+    if selected.endswith(("-ordered", "-paired")):
+        assert improves_affinity(measurements[winner], measurements[previous])
+        strategy, mode = selected.split("-")
+        assert winner == build_d2(
+            schema, **options, layout_strategy=strategy, cluster_affinity=mode
+        )
+    elif selected == "compact":
         assert improves_layout(measurements[winner], measurements[original])
         assert winner == build_d2(schema, **options, layout_strategy="compact")
     else:

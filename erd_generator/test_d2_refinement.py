@@ -7,8 +7,9 @@ import pytest
 
 from erd_generator import d2_refinement
 from erd_generator.d2_renderer import D2RenderConfig, D2RenderError
-from erd_generator.d2_geometry import LayoutMetrics, improves_layout
-from erd_generator.schema import Column, Table
+from erd_generator.d2_geometry import LayoutMetrics, improves_affinity, improves_layout
+from erd_generator.layout_config import GroupRule, LayoutConfig
+from erd_generator.schema import Column, ForeignKey, Table
 
 
 BASE = LayoutMetrics(1000, 800, 100000, 8000, 2000, 40)
@@ -35,6 +36,30 @@ def test_accepts_smaller_canvas_with_shorter_routes_and_bounded_crossings():
     assert improves_layout(BETTER, BASE)
     assert improves_layout(replace(BETTER, crossings=42), BASE)
     assert improves_layout(replace(BETTER, width=900, height=500), BASE)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"affinity_distance": 960},
+        {"width": 1001},
+        {"height": 801},
+        {"total_length": 8001},
+        {"longest": 2001},
+        {"crossings": 43},
+        {"width": 300, "height": 800},
+    ],
+)
+def test_closer_clusters_cannot_hide_other_layout_regressions(changes):
+    baseline = replace(BASE, affinity_distance=1000)
+    candidate = replace(baseline, affinity_distance=800)
+    assert not improves_affinity(replace(candidate, **changes), baseline)
+
+
+def test_affinity_gain_does_not_require_shrinking_the_whole_canvas():
+    baseline = replace(BASE, affinity_distance=1000)
+    assert improves_affinity(replace(baseline, affinity_distance=950), baseline)
+    assert not improves_affinity(BASE, BASE)
 
 
 @pytest.fixture
@@ -216,3 +241,178 @@ def test_unmeasurable_baseline_skips_optional_refinement(
     assert calls == ["baseline"]
     assert output.read_text() == "baseline SVG"
     assert "baseline metrics unavailable" in caplog.text
+
+
+def test_tala_skips_refinement_without_cross_cluster_links(refinement, monkeypatch):
+    schema, source, output, calls = refinement
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("ELK refinement must not run for TALA")
+
+    monkeypatch.setattr(d2_refinement, "measure_layout", unexpected)
+    monkeypatch.setattr(d2_refinement, "build_d2", unexpected)
+    selected = d2_refinement.render_optimized(
+        schema, source, output, D2RenderConfig(layout_engine="tala")
+    )
+    assert calls == ["baseline"]
+    assert source.read_text() == "baseline" and output.read_text() == "baseline SVG"
+    assert selected == "balanced"
+
+
+@pytest.fixture
+def affinity_refinement(refinement, monkeypatch):
+    schema, source, output, calls = refinement
+    config = LayoutConfig(
+        tuple(
+            GroupRule(f"g{i}", tuple(f"t{j}" for j in range(i * 3, i * 3 + 3)))
+            for i in range(4)
+        )
+    )
+    for a, b in ((0, 3), (3, 6), (6, 9)):
+        schema[f"t{a}"].foreign_keys.append(ForeignKey(("id",), f"t{b}", ("id",)))
+    metrics = {
+        "baseline": replace(BASE, affinity_distance=1000),
+        "compact:none": replace(BETTER, affinity_distance=1100),
+        "compact:ordered": replace(
+            BETTER, width=790, total_length=6900, affinity_distance=900
+        ),
+        "compact:paired": replace(
+            BETTER, width=780, total_length=6800, affinity_distance=800
+        ),
+        "balanced:ordered": replace(
+            BETTER, width=790, total_length=6900, affinity_distance=900
+        ),
+        "balanced:paired": replace(
+            BETTER, width=780, total_length=6800, affinity_distance=800
+        ),
+    }
+    monkeypatch.setattr(
+        d2_refinement,
+        "build_d2",
+        lambda *a, **kw: (
+            f"{kw.get('layout_strategy', 'balanced')}:{kw.get('cluster_affinity', 'none')}"
+        ),
+    )
+    monkeypatch.setattr(
+        d2_refinement,
+        "measure_layout",
+        lambda path, *a, **kw: metrics[path.read_text().removesuffix(" SVG")],
+    )
+    return schema, source, output, calls, config, metrics
+
+
+@pytest.mark.parametrize("engine", ["elk", "tala"])
+def test_selects_closer_clusters_with_bounded_native_renders(
+    affinity_refinement, engine
+):
+    schema, source, output, calls, layout, _ = affinity_refinement
+    selected = d2_refinement.render_optimized(
+        schema,
+        source,
+        output,
+        D2RenderConfig(layout_engine=engine),
+        layout_config=layout,
+    )
+    expected = "compact:paired" if engine == "elk" else "balanced:paired"
+    assert source.read_text() == expected
+    assert output.read_text() == expected + " SVG"
+    assert selected == expected.replace(":", "-")
+    assert len(calls) == (4 if engine == "elk" else 3)
+    assert set(source.parent.iterdir()) == {source, output}
+
+
+@pytest.mark.parametrize("regression", ["area", "distance", "longest", "crossings"])
+def test_affinity_compares_against_existing_compact_winner(
+    affinity_refinement, regression
+):
+    schema, source, output, _, layout, metrics = affinity_refinement
+    reference = metrics["compact:none"]
+    changes = dict(
+        area={"width": 900},
+        distance={"affinity_distance": 1050},
+        longest={"longest": 1900},
+        crossings={"crossings": 43},
+    )[regression]
+    for name in ("compact:ordered", "compact:paired"):
+        metrics[name] = replace(
+            reference,
+            affinity_distance=800,
+            **{k: v for k, v in changes.items() if k != "affinity_distance"},
+        )
+        if regression == "distance":
+            metrics[name] = replace(metrics[name], **changes)
+    assert (
+        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
+        == "compact"
+    )
+    assert output.read_text() == "compact:none SVG"
+
+
+def test_candidate_tolerances_cannot_accumulate(affinity_refinement):
+    schema, source, output, _, layout, metrics = affinity_refinement
+    metrics["compact:ordered"] = replace(metrics["compact:ordered"], crossings=42)
+    metrics["compact:paired"] = replace(metrics["compact:paired"], crossings=44)
+    assert (
+        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
+        == "compact-ordered"
+    )
+    assert output.read_text() == "compact:ordered SVG"
+
+
+@pytest.mark.parametrize("failure", ["render", "verification"])
+def test_failed_affinity_candidate_keeps_previous_winner(
+    affinity_refinement, monkeypatch, failure
+):
+    schema, source, output, _, layout, _ = affinity_refinement
+    name = "render_d2" if failure == "render" else "measure_layout"
+    original = getattr(d2_refinement, name)
+
+    def fail(path, *args, **kwargs):
+        if path.read_text().startswith("compact:paired"):
+            raise D2RenderError("candidate failure")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(d2_refinement, name, fail)
+    assert (
+        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
+        == "compact-ordered"
+    )
+    assert output.read_text() == "compact:ordered SVG"
+
+
+def test_identical_affinity_sources_are_rendered_only_once(
+    affinity_refinement, monkeypatch
+):
+    schema, source, output, calls, layout, _ = affinity_refinement
+    monkeypatch.setattr(d2_refinement, "build_d2", lambda *a, **kw: "compact:ordered")
+    d2_refinement.render_optimized(schema, source, output, layout_config=layout)
+    assert calls == ["baseline", "compact:ordered"]
+
+
+@pytest.mark.parametrize("disabled", ["small", "grouping", "appendix", "one_pair"])
+def test_skips_affinity_when_not_applicable(affinity_refinement, disabled):
+    schema, source, output, calls, layout, _ = affinity_refinement
+    config = D2RenderConfig(layout_engine="tala", force_appendix=disabled == "appendix")
+    if disabled == "small":
+        schema = {n: t for n, t in schema.items() if n != "t11"}
+        layout = LayoutConfig(
+            tuple(
+                replace(g, tables=tuple(n for n in g.tables if n in schema))
+                for g in layout.groups
+            )
+        )
+    if disabled == "one_pair":
+        schema["t3"].foreign_keys.clear()
+        schema["t6"].foreign_keys.clear()
+    assert (
+        d2_refinement.render_optimized(
+            schema,
+            source,
+            output,
+            config,
+            layout_config=layout,
+            grouping="none" if disabled == "grouping" else "auto",
+        )
+        == "balanced"
+    )
+    assert calls == ["baseline"]

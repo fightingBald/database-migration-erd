@@ -1,4 +1,4 @@
-"""Compare at most two native ELK layouts and publish the verified winner."""
+"""Compare bounded native layouts without sacrificing the existing winner."""
 
 import logging
 from pathlib import Path
@@ -6,12 +6,22 @@ import tempfile
 
 from .artifacts import write_text_atomic
 from .d2 import build_d2
-from .d2_geometry import improves_layout, measure_layout
+from .d2_affinity import group_weights
+from .d2_business import plan_groups
+from .d2_geometry import improves_affinity, improves_layout, measure_layout
 from .d2_renderer import D2RenderConfig, D2RenderError, render_d2
 from .layout_config import LayoutConfig
 from .schema import Schema
+from .validation import validate_schema
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _has_affinity(schema: Schema, config: LayoutConfig | None) -> bool:
+    relationships = validate_schema(schema).relationships
+    groups = plan_groups(schema, relationships, config=config)
+    weights = group_weights({n: g.key for g in groups for n in g.tables}, relationships)
+    return len(weights) >= 2
 
 
 def render_optimized(
@@ -45,71 +55,106 @@ def render_optimized(
         layout_config=layout_config,
         show_indexes=show_indexes,
     )
-    selected = "balanced"
+    selected, winning_source = "balanced", original
     with tempfile.TemporaryDirectory(
         prefix=".erd-layout-", dir=output.parent
     ) as temporary:
         folder = Path(temporary)
         winner = folder / "baseline.svg"
         render_d2(source, winner, config)
-        # Ordinary renders and appendices keep their existing single-pass path.
         eligible = (
             len(schema) >= 12 and grouping == "auto" and not config.force_appendix
         )
-        if eligible:
+        affinity = eligible and _has_affinity(schema, layout_config)
+        compact = eligible and config.layout_engine == "elk"
+        quality = None
+        if compact or affinity:
             try:
-                baseline = measure_layout(winner, schema, **options)
+                quality = measure_layout(winner, schema, **options)
             except D2RenderError as exc:
                 LOGGER.warning(
                     "D2 layout: baseline metrics unavailable; keeping baseline (%s)",
                     exc,
                 )
-                eligible = False
-            else:
-                eligible = (
-                    baseline.table_area / baseline.area < 0.18 or baseline.aspect > 2
-                )
-        if eligible:
+                compact = affinity = False
+
+        attempted = {original}
+
+        def attempt(strategy, mode="none"):
             candidate = build_d2(
                 schema,
                 direction=direction,
                 style=style,
-                layout_strategy="compact",
+                layout_strategy=strategy,
+                cluster_affinity=mode,
+                layout_engine=config.layout_engine,
                 show_references=show_references,
                 **options,
             )
-            if candidate != original:
-                trial = folder / "candidate.d2"
-                image = trial.with_suffix(".svg")
-                try:
-                    trial.write_text(candidate, encoding="utf-8")
-                    render_d2(trial, image, config)
-                    metrics = measure_layout(image, schema, **options)
-                except (D2RenderError, OSError) as exc:
-                    LOGGER.warning(
-                        "D2 layout: candidate failed (%s); keeping baseline",
-                        type(exc).__name__,
+            if candidate in attempted:
+                return None
+            attempted.add(candidate)
+            trial = folder / f"{strategy}-{mode}.d2"
+            image = trial.with_suffix(".svg")
+            try:
+                trial.write_text(candidate, encoding="utf-8")
+                render_d2(trial, image, config)
+                metrics = measure_layout(image, schema, **options)
+            except (D2RenderError, OSError) as exc:
+                LOGGER.warning(
+                    "D2 layout: %s-%s candidate failed (%s); keeping previous layout",
+                    strategy,
+                    mode,
+                    type(exc).__name__,
+                )
+                return None
+            return image, candidate, metrics
+
+        if compact and (quality.table_area / quality.area < 0.18 or quality.aspect > 2):
+            trial = attempt("compact")
+            if trial is not None and improves_layout(trial[2], quality):
+                LOGGER.info(
+                    "D2 layout: compact selected area=-%.1f%%",
+                    100 * (1 - trial[2].area / quality.area),
+                )
+                winner, winning_source, quality = trial
+                selected = "compact"
+            else:
+                LOGGER.info(
+                    "D2 layout: compact did not improve quality; keeping baseline"
+                )
+
+        # Fix the reference after the old compact step. Candidate tolerances
+        # must never accumulate, or a series of improvements could regress it.
+        reference = quality
+        strategy = selected
+        if affinity:
+            for mode in ("ordered", "paired"):
+                trial = attempt(strategy, mode)
+                if trial is None:
+                    continue
+                metrics = trial[2]
+                if not improves_affinity(metrics, reference):
+                    LOGGER.info(
+                        "D2 layout: %s-%s did not improve proximity safely",
+                        strategy,
+                        mode,
                     )
-                else:
-                    if improves_layout(metrics, baseline):
-                        write_text_atomic(source, candidate)
-                        winner, selected = image, "compact"
-                        LOGGER.info(
-                            "D2 layout: compact selected area=-%.1f%% longest-side=-%.1f%% routes=-%.1f%%",
-                            100 * (1 - metrics.area / baseline.area),
-                            100
-                            * (
-                                1
-                                - max(metrics.width, metrics.height)
-                                / max(baseline.width, baseline.height)
-                            ),
-                            100 * (1 - metrics.total_length / baseline.total_length)
-                            if baseline.total_length
-                            else 0,
-                        )
-                    else:
-                        LOGGER.info(
-                            "D2 layout: candidate did not improve quality; keeping baseline"
-                        )
+                    continue
+                if (
+                    quality is not reference
+                    and metrics.affinity_distance >= quality.affinity_distance
+                ):
+                    continue
+                winner, winning_source, quality = trial
+                selected = f"{strategy}-{mode}"
+            if quality is not reference:
+                LOGGER.info(
+                    "D2 layout: %s selected cluster-distance=-%.1f%%",
+                    selected,
+                    100 * (1 - quality.affinity_distance / reference.affinity_distance),
+                )
+        if winning_source != original:
+            write_text_atomic(source, winning_source)
         winner.replace(output)
     return selected

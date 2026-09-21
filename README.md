@@ -1,8 +1,8 @@
 # Database ER Diagram Generator
 
-Turn PostgreSQL migration SQL into ER diagrams with **D2 + ELK**. No database connection needed.
+Turn PostgreSQL migration SQL into ER diagrams with **D2**. No database connection needed.
 
-Outputs are `.d2` source and `.svg` images. D2 + ELK is the only backend.
+Outputs are `.d2` source and `.svg` images. **ELK** is the default layout engine; **TALA** is optional.
 
 [![Fictional library ER diagram with 16 tables in four automatic groups](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)
 
@@ -15,7 +15,7 @@ Entirely fictional library schema, generated with default settings. Click to enl
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
 - Read forward migrations: sql-migrate/goose Up sections and `.up.sql` files; skip rollback SQL.
 - Skip views, routine definitions, top-level procedure calls and extension setup; reject indexes targeting unknown tables.
-- Infer business groups with matching colours and automatically compare layouts for spacious diagrams, keeping a more compact result when quality improves.
+- Infer business groups with matching colours; bring strongly related groups closer when a rendered candidate improves layout quality.
 
 ## Install
 
@@ -51,11 +51,12 @@ The default uses clean styling, automatic business grouping, compact placement a
 
 | Option | Purpose |
 | --- | --- |
+| `--layout tala` | Use TALA; see [plugin setup and licensing](dev_guide.md#optional-tala-layout). |
 | `--fk-config file.yaml` | Add relationships; see the [YAML format](dev_guide.md#relationships-without-database-fk-constraints). |
 | `--layout-config file.yaml` | Override group membership, titles or colours; see [business layout](dev_guide.md#business-layout). |
 | `--show-references` | Show cross-group target tables and keys beside FK fields, e.g. `FK → books.id`; makes tables wider. |
 | `--direction down` | Lay out related tables from top to bottom. |
-| `--grouping none` | Disable automatic grouping and hub placement. |
+| `--grouping none` | Disable automatic grouping and layout refinement. |
 | `--hide-types` | Hide column data types. |
 | `--hide-indexes` | Hide index details below tables; retain tooltip notes. |
 | `--style classic` | Use the original visual style. |

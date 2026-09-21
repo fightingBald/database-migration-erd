@@ -1,4 +1,4 @@
-"""Load migration SQL, generate D2 source and optionally render an ELK SVG."""
+"""Load migration SQL, generate D2 source and optionally render an SVG."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .artifacts import write_text_atomic as _write_source
+from .d2_engines import LAYOUT_ENGINES
 from .d2_renderer import D2RenderConfig, D2RenderError
 from .d2_styles import STYLES
 from .diagnostics import ParseFailure
@@ -21,7 +22,7 @@ LOGGER = logging.getLogger(__name__)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate D2/ELK ERDs from migration SQL",
+        description="Generate D2 ERDs from migration SQL with ELK or TALA",
         allow_abbrev=False,
         usage="%(prog)s SQL_DIR OUTPUT [options]",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -76,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     d2 = parser.add_argument_group("D2 options")
     d2.add_argument(
+        "--layout",
+        choices=LAYOUT_ENGINES,
+        default="elk",
+        help="Layout engine: elk (default) or tala (requires d2plugin-tala to render)",
+    )
+    d2.add_argument(
         "--style",
         choices=STYLES,
         default="clean",
@@ -91,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--grouping",
         choices=["auto", "none"],
         default="auto",
-        help="Infer business and relationship groups (default: auto)",
+        help="Automatic groups and layout refinement; none disables both (default: auto)",
     )
     d2.add_argument(
         "--layout-config",
@@ -109,9 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="Hide index descriptions below tables; retain tooltip details",
     )
-    d2.add_argument(
-        "--render", choices=["svg"], help="Also render a same-stem SVG with ELK"
-    )
+    d2.add_argument("--render", choices=["svg"], help="Also render a same-stem SVG")
     d2.add_argument("--d2-binary", help="D2 executable (render only; default: d2)")
     d2.add_argument(
         "--render-timeout",
@@ -163,6 +168,7 @@ def _validate_options(args: argparse.Namespace) -> None:
         D2RenderConfig(
             executable=args.d2_binary or "d2",
             timeout=args.render_timeout if args.render_timeout is not None else 120,
+            layout_engine=args.layout,
         )
 
 
@@ -250,13 +256,15 @@ def run_cli(args: argparse.Namespace) -> int:
             layout_config=layout_config,
             show_references=args.show_references,
             show_indexes=args.show_indexes,
+            layout_engine=args.layout,
         )
         if incomplete:
             from .d2_emit import incomplete_notice
 
             source += incomplete_notice(schema, len(failures))
         LOGGER.info(
-            "D2 layout: grouping=%s layout_overrides=%d reference_labels=%s",
+            "D2 layout: engine=%s grouping=%s layout_overrides=%d reference_labels=%s",
+            args.layout,
             args.grouping,
             len(layout_config.groups) if layout_config else 0,
             args.show_references,
@@ -268,6 +276,7 @@ def run_cli(args: argparse.Namespace) -> int:
                 executable=args.d2_binary or "d2",
                 timeout=args.render_timeout if args.render_timeout is not None else 120,
                 force_appendix=args.force_appendix,
+                layout_engine=args.layout,
             )
             if incomplete:
                 from .d2_renderer import render_d2
