@@ -1,4 +1,4 @@
-"""Run the pinned D2 CLI with ELK and publish only a verified SVG."""
+"""Run the pinned D2 CLI with the selected engine and verify SVG publication."""
 
 import logging
 import math
@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
-from .d2_styles import COMPONENT_PADDING
+from .d2_engines import engine_flags, validate_layout_engine
 
 D2_VERSION = "0.7.1"
 LOGGER = logging.getLogger(__name__)
@@ -26,8 +26,10 @@ class D2RenderConfig:
     executable: str = "d2"
     timeout: float = 120
     force_appendix: bool = False
+    layout_engine: str = "elk"
 
     def __post_init__(self) -> None:
+        validate_layout_engine(self.layout_engine)
         if not math.isfinite(self.timeout) or self.timeout <= 0:
             raise ValueError("D2 timeout must be finite and positive")
         if not self.executable:
@@ -35,7 +37,11 @@ class D2RenderConfig:
 
 
 def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("D2_", "ELK_"))}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("D2_", "ELK_", "TALA_"))
+    }
     try:
         result = subprocess.run(
             arguments,
@@ -54,6 +60,10 @@ def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
             f"D2 {stage} timed out after {config.timeout:g}s (required version {D2_VERSION})"
         ) from exc
     except subprocess.CalledProcessError as exc:
+        if stage == "TALA check":
+            raise D2RenderError(
+                "D2 TALA check failed: install d2plugin-tala on PATH and verify with 'd2 layout tala'"
+            ) from exc
         # Compiler stderr may echo SQL-derived labels. Expose positions, not payloads.
         positions = re.findall(r":(\d+):(\d+):", exc.stderr or "")
         location = (
@@ -84,9 +94,16 @@ def render_d2(
         raise D2RenderError(
             f"D2 version mismatch: expected {D2_VERSION}, got {version[:80]!r}"
         )
-    layout = _run([config.executable, "layout", "elk"], config, "ELK check")
-    if not re.match(r"elk\s+\(bundled\):", layout):
+    engine = config.layout_engine
+    layout = _run(
+        [config.executable, "layout", engine], config, f"{engine.upper()} check"
+    )
+    if engine == "elk" and not re.match(r"elk\s+\(bundled\):", layout):
         raise D2RenderError("D2 ELK check failed: bundled ELK is unavailable")
+    if engine == "tala" and not re.match(r"tala\s+\(", layout):
+        raise D2RenderError(
+            "D2 TALA check failed: d2plugin-tala was not recognized; verify with 'd2 layout tala'"
+        )
     temporary = None
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -98,12 +115,8 @@ def render_d2(
             [
                 config.executable,
                 "--layout",
-                "elk",
-                "--elk-nodeSelfLoop=100",
-                "--elk-nodeNodeBetweenLayers=50",
-                "--elk-edgeNodeBetweenLayers=25",
-                f"--elk-padding=[top={COMPONENT_PADDING},left={COMPONENT_PADDING},"
-                f"bottom={COMPONENT_PADDING},right={COMPONENT_PADDING}]",
+                engine,
+                *engine_flags(engine),
                 "--watch=false",
                 "--theme=0",
                 "--dark-theme=-1",
@@ -138,8 +151,9 @@ def render_d2(
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     LOGGER.info(
-        "D2 render: version=%s layout=elk elapsed=%.3fs output=%s",
+        "D2 render: version=%s layout=%s elapsed=%.3fs output=%s",
         version,
+        engine,
         time.monotonic() - started,
         output,
     )

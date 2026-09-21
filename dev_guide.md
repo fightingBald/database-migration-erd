@@ -15,7 +15,7 @@ PYTHONPATH=./tools/erd-generator \
   --log-dir ./tools/erd-generator
 ```
 
-Replace the SQL and output paths, and propagate a nonzero exit code. Rendering requires **D2 0.7.1** with bundled ELK; `.d2` output alone needs no D2 executable.
+Replace the SQL and output paths, and propagate a nonzero exit code. Rendering requires **D2 0.7.1**; bundled ELK is the default. `.d2` output alone needs no D2 executable.
 
 Keep the tool's `.gitignore`; its rooted rules apply inside `tools/erd-generator/`, so they do not ignore the parent project's migrations. Add outputs outside that directory to the **parent project's** `.gitignore`:
 
@@ -27,6 +27,19 @@ Keep the tool's `.gitignore`; its rooted rules apply inside `tools/erd-generator
 ```
 
 For already tracked outputs, use `git rm --cached -- <generated-path>` to untrack them while keeping local files.
+
+## Optional TALA layout
+
+Install `d2plugin-tala` on PATH using the [official instructions](https://github.com/terrastruct/TALA). Tested with **D2 0.7.1 + TALA 0.4.3**:
+
+```bash
+d2 layout tala
+python -m erd_generator ./migrations ./generated/schema.svg --layout tala
+```
+
+Add the same `--layout tala` option to your existing codegen command. Groups, colours, FK labels, index footers and cluster proximity refinement work with either engine. ELK-specific rank adjustments stay disabled for TALA. Source-only `.d2` output records the selected engine and needs no plugin. Omit `--layout` or use `--layout elk` to switch back.
+
+TALA is closed-source: commercial use requires a license, and evaluation output has a watermark. Its [upstream repository](https://github.com/terrastruct/TALA) was archived in September 2026. Keep its binary/version managed by your environment; the tool does not download it. Upstream licensing uses `TSTRUCT_TOKEN` or an auth file (`TSTRUCT_AUTHFILE`); these are preserved for D2. In CI, supply credentials through the existing secret mechanism. Ambient `D2_*`, `ELK_*` and `TALA_*` overrides are ignored; TALA uses seeds `1,2,3`. Missing or failing TALA never silently switches to ELK, and rendering failure preserves the previous SVG.
 
 ## CI and Docusaurus
 
@@ -88,7 +101,13 @@ Selectors match exact qualified table names first, then case-sensitive wildcards
 
 `--show-references` adds labels such as `FK → members.id` beside source fields for relationships between top-level groups. It retains the arrows and can widen tables; it is off by default.
 
-SVG generation may compare one additional ELK layout and select a more compact result after geometry and relationship checks. Successful output includes its matching D2 source. Source-only generation writes the initial layout. Algorithm details live in the [layout modules](#code-map) and their tests.
+SVG generation keeps the existing layout as its baseline, including ELK's optional compact pass. With at least 12 tables and two distinct cross-group links, it then tries at most two proximity candidates: weighted group order, and disjoint strongly connected pairs in transparent containers. Each distinct FK constraint has weight 1; a composite FK counts once. Group membership, colours and all FK arrows are preserved.
+
+Small ordering problems use exhaustive search (up to 7 ranks); larger ones use at most 8 adjacent-swap improvements. Pairing maximizes total FK weight for up to 12 linked groups, then uses deterministic greedy matching for larger graphs. ELK can also reorder its existing rank classes; TALA receives the group declaration order without ELK rank rules.
+
+Selection uses verified native SVG geometry: FK-weighted mean Manhattan distance between group centres must fall by at least 5%. Canvas area, longest canvas side, total route length and longest route cannot increase; aspect ratio stays within the previous ratio or 2. The crossing proxy allows at most 5% more crossings (2 on small diagrams). Both candidates are compared with the same baseline. A failed or worse candidate keeps the previous winner; unverifiable baseline geometry skips refinement. Appendices and partial previews use one pass.
+
+Successful output includes matching D2 source and unchanged native SVG. Source-only generation writes the initial layout. Regenerate diagrams after upgrading; `--grouping none` disables automatic refinement while retaining explicit groups. Reverting the tool revision restores the previous automatic layout. Generated object paths may change with container placement.
 
 ## SQL support and diagnostics
 
@@ -115,7 +134,7 @@ View queries/dependencies, routine/extension side effects, enums, partitioning a
 
 Python callers applying separate SQL chunks must share a `SQLParseContext` through `parse_schema_from_sql(..., context=...)`; `load_schema_result()` manages this automatically. Regenerate diagrams after upgrading; rolling back the tool revision restores the previous rejection policy.
 
-Errors produce an **INCOMPLETE** preview when drawable tables remain, with exit code **1** and the requested outputs unchanged. Invalid tables and unresolved relationships are omitted and reported in `parse_log/`; a file with unclosed quotes or block boundaries is skipped. Previews use one ELK pass without layout overrides. Source-only requests create only `.partial.d2`. Each run clears the previous `.partial` pair, so stale previews are not reused. Known skipped commands are summarized in the log.
+Errors produce an **INCOMPLETE** preview when drawable tables remain, with exit code **1** and the requested outputs unchanged. Invalid tables and unresolved relationships are omitted and reported in `parse_log/`; a file with unclosed quotes or block boundaries is skipped. Previews use one pass of the selected engine without layout overrides. Source-only requests create only `.partial.d2`. Each run clears the previous `.partial` pair, so stale previews are not reused. Known skipped commands are summarized in the log.
 
 Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Index names, columns/expressions, methods and conditions appear below their table in small, left-aligned text, with long text wrapped. These native D2 Markdown labels use SVG `foreignObject`; view in a browser, since some SVG-to-image converters omit them. `--hide-indexes` restores the compact display. Full metadata remains in tooltips; `--force-appendix` also lists it in a diagram-wide appendix.
 
@@ -126,6 +145,7 @@ Regenerate existing diagrams to show index details. Indexed tables now have a co
 | SQL/schema/FK error | Inspect the marked `.partial` preview and `parse_log/` diagnostics; fix and rerun. Formal outputs are preserved; no preview is produced if no tables remain. |
 | Layout configuration error | Fix the reported configuration before regenerating the formal diagram. |
 | D2 missing or wrong version | Install exactly 0.7.1, check `d2 --version`, or set `--d2-binary`. |
+| TALA unavailable | Put `d2plugin-tala` on PATH and check `d2 layout tala`; see [setup](#optional-tala-layout). |
 | Rendering failure | The new D2 source is retained and the previous SVG is unchanged. Fix the error and rerun. |
 | Timeout | Inspect diagram size and increase `--render-timeout` if needed. |
 
@@ -138,7 +158,7 @@ Common display options are in the README; `--help` lists all options.
 | Option | Purpose |
 | --- | --- |
 | `--d2-binary PATH` | Rendering executable; defaults to `d2`. |
-| `--render-timeout SECONDS` | Positive timeout per D2 process; default 120. Layout comparison may use two processes. |
+| `--render-timeout SECONDS` | Positive timeout per D2 process; default 120. At most 4 render passes with ELK or 3 with TALA. |
 | `--force-appendix` | Include table tooltip notes in the SVG appendix. |
 | `--log-dir PATH` | Write diagnostics to `PATH/parse_log/`; defaults to the working directory. |
 
@@ -157,12 +177,12 @@ python -m ruff format --check .
 python -m pytest -q -m integration
 ```
 
-Fast tests do not require D2. Integration tests require exactly D2 0.7.1 with ELK and fail if it is unavailable. Unit tests live beside their modules; CLI and rendering tests live under `tests/`. Use synthetic fixtures only; keep company SQL, local research and generated diagrams out of Git.
+Fast tests do not require D2. Integration tests require exactly D2 0.7.1 with ELK and fail if it is unavailable. Optional TALA tests skip when `d2plugin-tala` is absent; once installed, run them with `python -m pytest -q -m tala`. A present but broken plugin fails those tests. Unit tests live beside their modules; CLI and rendering tests live under `tests/`. Use synthetic fixtures only; keep company SQL, local research and generated diagrams out of Git.
 
 ### Code map
 
 ```text
-SQL + optional FK YAML → Schema → D2 source → D2 / ELK → SVG
+SQL + optional FK YAML → Schema → D2 source → D2 (ELK or TALA) → SVG
 ```
 
 | Responsibility | Modules |
@@ -170,8 +190,9 @@ SQL + optional FK YAML → Schema → D2 source → D2 / ELK → SVG
 | CLI and orchestration | [cli.py](erd_generator/cli.py) |
 | SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `migrations.py`, `sql_statements.py`, `postgres_commands.py`, `postgres_exclusions.py`, `postgres_do.py`, `diagnostics.py` |
 | Schema, preview filtering and configuration | [schema.py](erd_generator/schema.py), `validation.py`, `fk_config.py`, `layout_config.py` |
-| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_indexes.py`, `d2_references.py`, `d2_styles.py` |
+| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_affinity.py`, `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_indexes.py`, `d2_references.py`, `d2_styles.py` |
 | Rendering and layout comparison | [d2_renderer.py](erd_generator/d2_renderer.py), `d2_refinement.py`, `d2_geometry.py` |
+| Engine choices and render flags | [d2_engines.py](erd_generator/d2_engines.py) |
 | Atomic source publication | [artifacts.py](erd_generator/artifacts.py) |
 
 CLI loads inputs and coordinates generation. Planners operate on Schema without I/O or mutation; the renderer does not depend on Schema or planners. `d2_refinement` coordinates rendering candidates and geometry checks. Lower-level modules must not import the coordinator or CLI.

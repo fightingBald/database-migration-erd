@@ -1,4 +1,4 @@
-"""Read pinned D2/ELK geometry; never change SVG coordinates or diagram content."""
+"""Read native D2 SVG geometry; never change coordinates or diagram content."""
 
 from dataclasses import dataclass
 from itertools import combinations
@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
+from .d2_affinity import group_weights, weighted_distance
 from .d2_business import plan_groups
 from .d2_indexes import FOOTER_STYLE, index_footer
 from .d2_renderer import D2RenderError
@@ -27,6 +28,7 @@ class LayoutMetrics:
     total_length: float
     longest: float
     crossings: int
+    affinity_distance: float = 0
 
     @property
     def area(self) -> float:
@@ -45,6 +47,22 @@ def improves_layout(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool:
     """
     return (
         candidate.area <= baseline.area * 0.95
+        and max(candidate.width, candidate.height)
+        <= max(baseline.width, baseline.height)
+        and candidate.aspect <= max(2.0, baseline.aspect)
+        and candidate.total_length <= baseline.total_length
+        and candidate.longest <= baseline.longest
+        and candidate.crossings
+        <= baseline.crossings + max(2, int(baseline.crossings * 0.05))
+    )
+
+
+def improves_affinity(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool:
+    """Require 5% closer related clusters without degrading the old winner."""
+    return (
+        baseline.affinity_distance > 0
+        and candidate.affinity_distance <= baseline.affinity_distance * 0.95
+        and candidate.area <= baseline.area
         and max(candidate.width, candidate.height)
         <= max(baseline.width, baseline.height)
         and candidate.aspect <= max(2.0, baseline.aspect)
@@ -276,20 +294,24 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
     if not all(bounds.contains(box) for box in footprints.values()):
         raise ValueError("clipped geometry")
     validation = validate_schema(schema)
-    expected = [
-        g
-        for g in plan_groups(
-            schema,
-            validation.relationships,
-            automatic=grouping == "auto",
-            config=config,
-        )
-        if g.label
-    ]
+    groups = plan_groups(
+        schema,
+        validation.relationships,
+        automatic=grouping == "auto",
+        config=config,
+    )
+    centres = {}
     _no_overlaps([box for _, box, _ in regions])
     if not all(bounds.contains(box) for _, box, _ in regions):
         raise ValueError("clipped geometry")
-    for group in expected:
+    for group in groups:
+        if not group.label:
+            members = [footprints[n] for n in group.tables]
+            left, top = min(b.x for b in members), min(b.y for b in members)
+            right = max(b.x + b.width for b in members)
+            bottom = max(b.y + b.height for b in members)
+            centres[group.key] = ((left + right) / 2, (top + bottom) / 2)
+            continue
         found = next(
             (
                 i
@@ -301,7 +323,8 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
         )
         if found is None:
             raise ValueError("business regions")
-        regions.pop(found)
+        _, box, _ = regions.pop(found)
+        centres[group.key] = (box.x + box.width / 2, box.y + box.height / 2)
     if regions:
         raise ValueError("business regions")
     routes = _routes(root)
@@ -358,4 +381,10 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
         sum(lengths),
         max(lengths, default=0),
         _crossings(routes),
+        weighted_distance(
+            group_weights(
+                {n: g.key for g in groups for n in g.tables}, validation.relationships
+            ),
+            centres,
+        ),
     )

@@ -4,6 +4,7 @@ import pytest
 
 from erd_generator.d2_geometry import measure_layout
 from erd_generator.d2_renderer import D2RenderError
+from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Table
 
 
@@ -67,6 +68,23 @@ def test_hidden_types_are_still_checked(diagram):
     path, schema = diagram
     path.write_text(SVG.replace("<text>INT</text>", "<text/>"))
     assert measure_layout(path, schema, show_types=False).longest == 111
+
+
+def test_affinity_uses_verified_cluster_positions_without_modifying_svg(diagram):
+    path, schema = diagram
+    content = SVG.replace('y="20"', 'y="40"').replace("M 120 110", "M 120 130")
+    content = content.replace(
+        "</svg>",
+        '<g><g class="shape"><rect x="10" y="0" width="120" height="180"/></g><text>One</text></g>'
+        '<g><g class="shape"><rect x="210" y="0" width="120" height="180"/></g><text>Two</text></g></svg>',
+    )
+    path.write_text(content)
+    config = LayoutConfig(
+        (GroupRule("one", ("a",), "One"), GroupRule("two", ("b",), "Two"))
+    )
+    metrics = measure_layout(path, schema, show_types=True, layout_config=config)
+    assert metrics.affinity_distance == 200
+    assert path.read_text() == content
 
 
 def test_multiple_constraints_cannot_reuse_one_matching_arrow(diagram):

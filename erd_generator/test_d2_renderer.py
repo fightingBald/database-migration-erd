@@ -118,3 +118,59 @@ def test_preflight_rejects_incompatible_engine(
 def test_invalid_timeout(timeout):
     with pytest.raises(ValueError, match="timeout"):
         D2RenderConfig(timeout=timeout)
+
+
+def test_tala_uses_plugin_and_isolated_flags_preserving_license_environment(
+    monkeypatch, paths, caplog
+):
+    monkeypatch.setenv("D2_LAYOUT", "elk")
+    monkeypatch.setenv("ELK_NODE_NODE", "999")
+    monkeypatch.setenv("TALA_SEEDS", "999")
+    monkeypatch.setenv("TSTRUCT_TOKEN", "test-license-not-a-real-token")
+    calls = fake_d2(monkeypatch, elk="tala (/tmp/d2plugin-tala):")
+    render_d2(*paths, D2RenderConfig(layout_engine="tala"))
+    assert calls[1][0] == ["d2", "layout", "tala"]
+    argv, kwargs = calls[-1]
+    assert argv[argv.index("--layout") + 1] == "tala"
+    assert not any(arg.startswith("--elk-") for arg in argv)
+    assert "TALA_SEEDS" not in kwargs["env"]
+    assert "ELK_NODE_NODE" not in kwargs["env"]
+    assert kwargs["env"]["TSTRUCT_TOKEN"] == "test-license-not-a-real-token"
+    assert "test-license-not-a-real-token" not in caplog.text
+    assert paths[1].read_text() == SVG
+
+
+def test_missing_tala_plugin_has_actionable_error_without_fallback(monkeypatch, paths):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, "0.7.1", "")
+        raise subprocess.CalledProcessError(1, argv, stderr="private payload")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(D2RenderError, match="d2plugin-tala") as error:
+        render_d2(*paths, D2RenderConfig(layout_engine="tala"))
+    assert "private payload" not in str(error.value)
+    assert calls[-1] == ["d2", "layout", "tala"]
+    assert paths[1].read_text() == "old svg"
+    assert set(paths[0].parent.iterdir()) == set(paths)
+
+
+def test_tala_failure_does_not_publish_or_leak_renderer_payload(monkeypatch, paths):
+    fake_d2(
+        monkeypatch,
+        elk="tala (/tmp/d2plugin-tala):",
+        error=subprocess.CalledProcessError(1, ["d2"], stderr="private payload"),
+    )
+    with pytest.raises(D2RenderError) as error:
+        render_d2(*paths, D2RenderConfig(layout_engine="tala"))
+    assert "private payload" not in str(error.value)
+    assert paths[1].read_text() == "old svg"
+    assert set(paths[0].parent.iterdir()) == set(paths)
+
+
+def test_invalid_render_layout_is_rejected():
+    with pytest.raises(ValueError, match="layout engine"):
+        D2RenderConfig(layout_engine="dagre")
