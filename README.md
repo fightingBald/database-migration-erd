@@ -54,3 +54,5 @@ The default uses clean styling, automatic business grouping, compact placement a
 Supports common PostgreSQL schema migrations. See the [developer guide](dev_guide.md) for supported SQL, all options, troubleshooting and development.
 
 To regenerate diagrams in CI and display them in Docusaurus, see [CI integration](dev_guide.md#ci-and-docusaurus).
+
+To include the tool under `tools/erd-generator/` in an existing project, see [codegen integration](dev_guide.md#use-inside-an-existing-project).
