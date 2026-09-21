@@ -286,6 +286,32 @@ Rendering explicitly requests ELK and ignores ambient `D2_*`/`ELK_*` environment
 
 No SQL or diagram is uploaded to an online service by these commands.
 
+## Use inside an existing project
+
+Place the tool's source, dependency files, tests and `.gitignore` under `tools/erd-generator/`. Keep the source repository's `.git/` directory and local environments, inputs and generated files out of the copy. `.gitignore` controls Git tracking; it does not filter files during a filesystem copy.
+
+Prepare the Python environment using the README installation steps from that directory, and install D2 0.7.1. From the parent project's root, its existing codegen script can invoke:
+
+```bash
+PYTHONPATH=./tools/erd-generator \
+  ./tools/erd-generator/.venv/bin/python -m erd_generator \
+  ./db/migrations ./docs-site/static/img/schema.svg \
+  --log-dir ./tools/erd-generator
+```
+
+Replace the two input/output paths with the project's actual paths and propagate a nonzero exit code to codegen. The log directory keeps diagnostics under the tool's ignored `parse_log/` directory.
+
+Keep the nested `.gitignore` with the tool. Its rules exclude the tool's virtual environments, caches, build/coverage outputs, generated diagrams, diagnostics and local planning/input files. Runtime code, dependency declarations and regression tests remain tracked. Rooted rules such as `/migrations/` apply inside the tool directory, so they do not ignore the parent project's migration SQL.
+
+For output outside the tool directory, add the exact generated paths to the **parent project's** `.gitignore`, for example:
+
+```gitignore
+/docs-site/static/img/schema.svg
+/docs-site/static/img/schema.d2
+```
+
+An ignore rule does not untrack an existing file. Use `git rm --cached -- <generated-path>` to remove a previously committed artifact from tracking while retaining the local file. Removing a rule makes future files eligible for tracking again; it does not restore files removed from the index.
+
 ## CI and Docusaurus
 
 Run the generator before each documentation build, using the migration files from that CI checkout:

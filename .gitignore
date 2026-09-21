@@ -1,13 +1,38 @@
-.venv/
-.idea/
+# Keep this file inside the tool directory when copied to tools/erd-generator/.
+# Leading slashes are relative to this .gitignore, not the parent repository.
+
+# Python environments and caches.
+/.venv/
+/venv/
+/env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-generated/
-build/
-parse_log/
+.mypy_cache/
+.cache/
+
+# Build, packaging and coverage outputs.
+/build/
+/dist/
+*.egg-info/
+.eggs/
+.coverage
+.coverage.*
+/htmlcov/
+/coverage.xml
+
+# Local editor, OS and environment settings.
+.idea/
+.vscode/
 .DS_Store
+.env
+.env.*
+!.env.example
+
+# Generated diagrams, diagnostics and retired presentation assets.
+/generated/
+/parse_log/
 /TECH_SHARING_PPT.md
 /video.mp4
 
