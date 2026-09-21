@@ -126,7 +126,6 @@ def test_unsupported_do_never_partially_applies_a_block(body):
         "CREATE SCHEMA app CREATE TABLE embedded (id int)",
         "ALTER SCHEMA app RENAME TO renamed",
         "DROP SCHEMA app CASCADE",
-        "CALL changes_schema()",
     ],
 )
 def test_unsupported_schema_and_procedural_commands_remain_errors(command):

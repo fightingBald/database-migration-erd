@@ -4,7 +4,7 @@ See the [README](README.md) for installation and everyday use. This guide covers
 
 ## Use inside an existing project
 
-Copy the source, dependency files, tests and `.gitignore` into `tools/erd-generator/`. Exclude the original `.git/`, virtual environments, local SQL and generated files; `.gitignore` does not filter a filesystem copy.
+Runtime needs only `erd_generator/`, `requirements.txt` and `.gitignore` copied into `tools/erd-generator/`. Keep tests and development files only if you plan to modify the tool. Exclude the original `.git/`, virtual environments, local SQL and generated files; `.gitignore` does not filter a filesystem copy. No wrapper, Makefile or extra configuration is required.
 
 Follow the README installation steps inside that directory. From the parent project's root, call this from its existing codegen script:
 
@@ -22,6 +22,8 @@ Keep the tool's `.gitignore`; its rooted rules apply inside `tools/erd-generator
 ```gitignore
 /docs-site/static/img/schema.svg
 /docs-site/static/img/schema.d2
+/docs-site/static/img/schema.partial.svg
+/docs-site/static/img/schema.partial.d2
 ```
 
 For already tracked outputs, use `git rm --cached -- <generated-path>` to untrack them while keeping local files.
@@ -44,7 +46,7 @@ In a Docusaurus Markdown page, reference the generated file under `docs-site/sta
 [Open the full-size diagram](/img/schema.svg)
 ```
 
-Treat `.svg` and `.d2` as build outputs; CI does not need to commit them. Stop the job if generation fails. PRs can validate generation and the site build; the deployment job publishes the resulting site. If these are separate jobs, pass artifacts from the same run and require the previous job to succeed. Verify the image under the site's configured `baseUrl` before publishing.
+Treat `.svg` and `.d2` as build outputs; CI does not need to commit them. Propagate codegen's exit code and stop the documentation build on failure. Partial previews and `parse_log/` can be retained as diagnostic artifacts, never as the published diagram. If generation and deployment are separate jobs, pass artifacts from the same run and require generation to succeed. Verify the image under the site's configured `baseUrl` before publishing.
 
 ## Relationships without database FK constraints
 
@@ -97,20 +99,30 @@ Inputs must be UTF-8. `V<number>__description.sql` migrations are ordered by num
 | `CREATE TABLE`, common `ALTER TABLE`, `DROP TABLE` and column/constraint changes | Update the schema. |
 | `CREATE INDEX`, `DROP INDEX`, `ALTER INDEX ... RENAME` | Update index metadata, including expression/partial index notes. |
 | `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES`, `CREATE ROLE/USER`, standalone `CREATE SCHEMA` | Ignore supported setup commands that do not change ERD objects. |
-| Function/procedure definitions with string or dollar-quoted bodies | Ignore the definition; never execute the body. |
+| `CREATE VIEW` | Skip the definition and query. |
+| `CREATE MATERIALIZED VIEW`, `DROP MATERIALIZED VIEW` | Track explicitly created/dropped names across files; skip indexes only for recorded materialized views. Unknown index targets still fail. |
+| Function/procedure definitions, including `= defaults`, quoted and `BEGIN ATOMIC` bodies | Skip the complete definition before syntax parsing; never execute the body. |
+| Top-level `CALL`, `DROP PROCEDURE`, `CREATE EXTENSION` | Skip; do not infer their effects on tables. |
 | Straight-line `DO` blocks | Apply supported static table/index DDL; dollar-quoted bodies stay intact. |
 | Known role/permission `DO` blocks using `IF` or constant `EXECUTE format(...)` | Ignore only after every branch and command is checked as ERD-neutral. |
-| Conditional/dynamic structural DDL, loops, calls or unsupported procedural constructs | Report a diagnostic and stop generation. |
+| Conditional/dynamic structural DDL, loops, calls inside `DO` or unsupported procedural constructs | Report a diagnostic; roll back the statement/block and continue scanning. |
 
 The tool does not execute SQL. Unsupported procedural migrations need ordinary DDL or a reviewed schema snapshot as input. See the [role setup fixture](tests/fixtures/postgres_role_setup.sql) for an accepted block and [the block checker](erd_generator/postgres_do.py) for exact rules.
 
-Views, enums, partitioning, `search_path` and some other PostgreSQL features are not fully modeled. Zero diagnostics does not guarantee complete PostgreSQL interpretation. Self-referencing arrows may attach to table boundaries in D2/ELK; their field names remain explicit in labels.
+View queries/dependencies, routine/extension side effects, enums, partitioning and `search_path` are not modeled. Use consistent qualified names for materialized views and their indexes; no short-name matching is attempted. Supply ordinary DDL or a reviewed snapshot for tables created through calls/extensions. Zero diagnostics does not guarantee complete PostgreSQL interpretation. Self-referencing arrows may attach to table boundaries in D2/ELK; their field names remain explicit in labels.
 
-Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Full relationship and index details appear in tooltips; `--force-appendix` makes those notes visible in the SVG.
+Python callers applying separate SQL chunks must share a `SQLParseContext` through `parse_schema_from_sql(..., context=...)`; `load_schema_result()` manages this automatically. Regenerate diagrams after upgrading; rolling back the tool revision restores the previous rejection policy.
+
+Errors produce an **INCOMPLETE** preview when drawable tables remain, with exit code **1** and the requested outputs unchanged. Invalid tables and unresolved relationships are omitted and reported in `parse_log/`; a file with unclosed quotes or block boundaries is skipped. Previews use one ELK pass without layout overrides. Source-only requests create only `.partial.d2`. Each run clears the previous `.partial` pair, so stale previews are not reused. Known skipped commands are summarized in the log.
+
+Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Index names, columns/expressions, methods and conditions appear below their table in small, left-aligned text, with long text wrapped. These native D2 Markdown labels use SVG `foreignObject`; view in a browser, since some SVG-to-image converters omit them. `--hide-indexes` restores the compact display. Full metadata remains in tooltips; `--force-appendix` also lists it in a diagram-wide appendix.
+
+Regenerate existing diagrams to show index details. Indexed tables now have a containing D2 node, so scripts using generated object paths must account for the `_erd_table` child. Python callers can restore the previous structure with `show_indexes=False` in `build_d2()` and `render_optimized()`.
 
 | Problem | What to check |
 | --- | --- |
-| SQL/configuration error | Read the reported file/object and `parse_log/` diagnostics; fix the input before regenerating. Existing outputs are preserved. |
+| SQL/schema/FK error | Inspect the marked `.partial` preview and `parse_log/` diagnostics; fix and rerun. Formal outputs are preserved; no preview is produced if no tables remain. |
+| Layout configuration error | Fix the reported configuration before regenerating the formal diagram. |
 | D2 missing or wrong version | Install exactly 0.7.1, check `d2 --version`, or set `--d2-binary`. |
 | Rendering failure | The new D2 source is retained and the previous SVG is unchanged. Fix the error and rerun. |
 | Timeout | Inspect diagram size and increase `--render-timeout` if needed. |
@@ -154,9 +166,9 @@ SQL + optional FK YAML → Schema → D2 source → D2 / ELK → SVG
 | Responsibility | Modules |
 | --- | --- |
 | CLI and orchestration | [cli.py](erd_generator/cli.py) |
-| SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `sql_statements.py`, `postgres_commands.py`, `postgres_do.py`, `diagnostics.py` |
-| Schema and configuration | [schema.py](erd_generator/schema.py), `validation.py`, `fk_config.py`, `layout_config.py` |
-| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_references.py`, `d2_styles.py` |
+| SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `sql_statements.py`, `postgres_commands.py`, `postgres_exclusions.py`, `postgres_do.py`, `diagnostics.py` |
+| Schema, preview filtering and configuration | [schema.py](erd_generator/schema.py), `validation.py`, `fk_config.py`, `layout_config.py` |
+| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_indexes.py`, `d2_references.py`, `d2_styles.py` |
 | Rendering and layout comparison | [d2_renderer.py](erd_generator/d2_renderer.py), `d2_refinement.py`, `d2_geometry.py` |
 | Atomic source publication | [artifacts.py](erd_generator/artifacts.py) |
 

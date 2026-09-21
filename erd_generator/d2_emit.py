@@ -2,6 +2,13 @@
 
 from .d2_styles import CLEAN_CONNECTION, CLEAN_TABLE, GroupPalette
 from .d2_references import FieldReferences
+from .d2_indexes import (
+    FOOTER_FONT_SIZE,
+    TABLE_BODY_KEY,
+    footer_markup,
+    index_footer,
+    sorted_indexes,
+)
 from .schema import Schema, Table
 from .validation import Relationship, primary_columns
 
@@ -19,6 +26,32 @@ def quote_d2(value: str) -> str:
         .replace("\t", "\\t")
     )
     return f'"{value}"'
+
+
+def incomplete_notice(schema: Schema, diagnostic_count: int) -> str:
+    """A native canvas notice, separate from SQL tables and their FK ports."""
+    key = "_erd_partial_notice"
+    while key in schema:
+        key += "_"
+    label = (
+        "INCOMPLETE\nStructure not fully verified\n"
+        f"{diagnostic_count} diagnostics; see parse_log/"
+    )
+    return "\n".join(
+        [
+            "",
+            "# Incomplete preview; do not publish as the final schema.",
+            f"{key}: {{",
+            "  shape: text",
+            f"  label: {quote_d2(label)}",
+            "  near: top-center",
+            "  style.font-size: 26",
+            "  style.bold: true",
+            '  style.font-color: "#92400E"',
+            "}",
+            "",
+        ]
+    )
 
 
 def _unique_columns(table: Table) -> set[str]:
@@ -56,16 +89,7 @@ def _notes(table: Table, relations: tuple[Relationship, ...]) -> str:
             lines.append(
                 f"{fk.name or 'FK'}: ({', '.join(fk.columns)}) -> {fk.ref_table} ({', '.join(fk.ref_columns)})"
             )
-    for index in sorted(
-        table.indexes,
-        key=lambda i: (
-            i.name or "",
-            i.columns,
-            i.unique,
-            i.method or "",
-            i.where or "",
-        ),
-    ):
+    for index in sorted_indexes(table):
         label = "Unique index" if index.unique else "Index"
         name = f" {index.name}" if index.name else ""
         method = f" using {index.method}" if index.method else ""
@@ -74,12 +98,18 @@ def _notes(table: Table, relations: tuple[Relationship, ...]) -> str:
     return "\n".join(lines)
 
 
+def table_path(table: Table, show_indexes: bool) -> str:
+    path = quote_d2(table.name)
+    return f"{path}.{TABLE_BODY_KEY}" if show_indexes and table.indexes else path
+
+
 def table_lines(
     schema: Schema,
     relationships: tuple[Relationship, ...],
     *,
     show_types: bool,
     style: str,
+    show_indexes: bool = True,
     palette: GroupPalette | None = None,
     references: FieldReferences | None = None,
 ) -> list[str]:
@@ -89,11 +119,15 @@ def table_lines(
     for fk in relationships:
         foreign_columns.setdefault(fk.table, set()).update(fk.columns)
     for name, table in sorted(schema.items()):
-        lines.extend([f"{quote_d2(name)}: {{", "  shape: sql_table"])
+        footer = index_footer(table) if show_indexes else ""
+        key = TABLE_BODY_KEY if footer else quote_d2(name)
+        body = [f"{key}: {{", "  shape: sql_table"]
+        if footer:
+            body.append(f"  label: {quote_d2(name)}")
         if style == "clean":
-            lines.extend(CLEAN_TABLE)
+            body.extend(CLEAN_TABLE)
         if palette is not None:
-            lines.extend(
+            body.extend(
                 [
                     f'  style.fill: "{palette.header}"',
                     f'  style.font-color: "{palette.text}"',
@@ -126,11 +160,36 @@ def table_lines(
                 )
                 suffix = f" {{constraint: {value}}}"
             data_type = column.data_type if show_types else ""
-            lines.append(f"  {quote_d2(column.name)}: {quote_d2(data_type)}{suffix}")
+            body.append(f"  {quote_d2(column.name)}: {quote_d2(data_type)}{suffix}")
         notes = _notes(table, relationships)
         if notes:
-            lines.append(f"  tooltip: {quote_d2(notes)}")
-        lines.extend(["}", ""])
+            # D2 parses tooltips as Markdown. Keep SQL identifiers/predicates
+            # containing HTML delimiters literal, including existing entities.
+            notes = notes.replace("&", "&amp;").replace("<", "&lt;")
+            body.append(f"  tooltip: {quote_d2(notes)}")
+        body.append("}")
+        if footer:
+            # A container's inside label participates in native ELK sizing.
+            # No grid, synthetic column or layout-only edge can alter FK ports.
+            lines.extend(
+                [
+                    f"{quote_d2(name)}: {{",
+                    "  shape: rectangle",
+                    "  label: |md",
+                    f"    {footer_markup(footer)}",
+                    "  |",
+                    "  label.near: bottom-left",
+                    "  style.fill: transparent",
+                    "  style.stroke-width: 0",
+                    f"  style.font-size: {FOOTER_FONT_SIZE}",
+                    '  style.font-color: "#64748B"',
+                    *("  " + line for line in body),
+                    "}",
+                    "",
+                ]
+            )
+        else:
+            lines.extend([*body, ""])
     return lines
 
 
@@ -188,6 +247,7 @@ def diagram_lines(
     *,
     show_types: bool,
     style: str,
+    show_indexes: bool = True,
     metadata: tuple[Relationship, ...] | None = None,
     palette: GroupPalette | None = None,
     ranks: dict[str, int] | None = None,
@@ -198,9 +258,15 @@ def diagram_lines(
         relationships if metadata is None else metadata,
         show_types=show_types,
         style=style,
+        show_indexes=show_indexes,
         palette=palette,
         references=references,
-    ) + relationship_lines(relationships, style=style, ranks=ranks)
+    ) + relationship_lines(
+        relationships,
+        style=style,
+        ranks=ranks,
+        paths={name: table_path(table, show_indexes) for name, table in schema.items()},
+    )
 
 
 def container_lines(

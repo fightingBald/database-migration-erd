@@ -8,6 +8,7 @@ import unicodedata
 
 from .schema import Schema, Table
 from .d2_grouping import centered_ranks, layout_ranks
+from .d2_indexes import FOOTER_FONT_SIZE, index_footer
 from .d2_styles import COMPONENT_PADDING, GRID_GAP
 from .validation import Relationship
 
@@ -79,7 +80,9 @@ def _text_width(text: str) -> int:
     )
 
 
-def _table_size(table: Table, show_types: bool) -> tuple[int, int]:
+def _table_size(
+    table: Table, show_types: bool, show_indexes: bool = True
+) -> tuple[int, int]:
     names = max((_text_width(c.name) for c in table.columns), default=0)
     types = (
         max((_text_width(c.data_type) for c in table.columns), default=0)
@@ -87,7 +90,14 @@ def _table_size(table: Table, show_types: bool) -> tuple[int, int]:
         else 0
     )
     width = max(180, 20 + 11 * _text_width(table.name), 80 + 10 * (names + types))
-    return width, 36 * (len(table.columns) + 1)
+    height = 36 * (len(table.columns) + 1)
+    if show_indexes and (footer := index_footer(table)):
+        width = max(width, 8 * _text_width(footer)) + 2 * COMPONENT_PADDING
+        height += (
+            int(1.5 * FOOTER_FONT_SIZE * len(footer.splitlines()))
+            + 2 * COMPONENT_PADDING
+        )
+    return width, height
 
 
 def table_ranks(
@@ -97,6 +107,7 @@ def table_ranks(
     direction: str,
     *,
     center: bool = True,
+    show_indexes: bool = True,
 ) -> dict[str, int]:
     """Center dominant tables only when estimated area and proportions improve.
 
@@ -116,7 +127,7 @@ def table_ranks(
     degree = max(map(len, neighbors.values()), default=0)
     if degree < 3:
         return original
-    sizes = {n: _table_size(schema[n], show_types) for n in names}
+    sizes = {n: _table_size(schema[n], show_types, show_indexes) for n in names}
     main, cross = (0, 1) if direction in {"right", "left"} else (1, 0)
     candidate = centered_ranks(
         names,
@@ -145,9 +156,16 @@ def table_ranks(
 
 
 def _component_size(
-    component: Component, schema: Schema, show_types: bool, direction: str
+    component: Component,
+    schema: Schema,
+    show_types: bool,
+    direction: str,
+    show_indexes: bool,
 ) -> tuple[int, int]:
-    sizes = {name: _table_size(schema[name], show_types) for name in component.tables}
+    sizes = {
+        name: _table_size(schema[name], show_types, show_indexes)
+        for name in component.tables
+    }
     neighbors = {name: set() for name in component.tables}
     outgoing = set()
     for fk in component.relationships:
@@ -193,6 +211,7 @@ def plan_layout(
     show_types: bool,
     direction: str,
     keep_together: tuple[tuple[str, ...], ...] = (),
+    show_indexes: bool = True,
 ) -> tuple[tuple[Component, ...], ...]:
     """Choose columns by estimated aspect ratio and wasted area, without I/O.
 
@@ -206,23 +225,33 @@ def plan_layout(
         return (components,)
     return _pack(
         [
-            (component, *estimate_size(component, schema, show_types, direction))
+            (
+                component,
+                *estimate_size(
+                    component, schema, show_types, direction, show_indexes=show_indexes
+                ),
+            )
             for component in components
         ]
     )
 
 
 def estimate_size(
-    component: Component, schema: Schema, show_types: bool, direction: str
+    component: Component,
+    schema: Schema,
+    show_types: bool,
+    direction: str,
+    *,
+    show_indexes: bool = True,
 ) -> tuple[int, int]:
     """Estimate a region which may join otherwise disconnected business tables."""
     parts = connected_components(
         {n: schema[n] for n in component.tables}, component.relationships
     )
     if len(parts) == 1:
-        return _component_size(component, schema, show_types, direction)
+        return _component_size(component, schema, show_types, direction, show_indexes)
     sizes = {
-        part.tables: _component_size(part, schema, show_types, direction)
+        part.tables: _component_size(part, schema, show_types, direction, show_indexes)
         for part in parts
     }
     packed = _pack([(part, *sizes[part.tables]) for part in parts])

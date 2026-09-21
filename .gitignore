@@ -33,6 +33,8 @@ __pycache__/
 # Generated diagrams, diagnostics and retired presentation assets.
 /generated/
 /parse_log/
+*.partial.d2
+*.partial.svg
 /TECH_SHARING_PPT.md
 /video.mp4
 

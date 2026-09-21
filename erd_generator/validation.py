@@ -1,8 +1,9 @@
 """Validate schema relationships without inventing graph objects or changing SQL metadata."""
 
 from dataclasses import dataclass
+from copy import deepcopy
 
-from .schema import Schema, Table
+from .schema import ForeignKey, Schema, Table
 
 
 @dataclass(frozen=True, order=True)
@@ -73,3 +74,37 @@ def validate_schema(schema: Schema) -> SchemaValidation:
             if identity not in relations or name < relations[identity].name:
                 relations[identity] = Relationship(*identity, name)
     return SchemaValidation(tuple(sorted(relations.values())), tuple(errors))
+
+
+def preview_schema(schema: Schema) -> tuple[Schema, tuple[str, ...]]:
+    """Copy the drawable subset, explicitly reporting every omitted object.
+
+    This does not establish correctness after skipped SQL: callers must label
+    any resulting diagram incomplete and retain a failing exit status.
+    """
+    preview = deepcopy(schema)
+    omissions = []
+    for key, table in list(preview.items()):
+        foreign_keys, table.foreign_keys = table.foreign_keys, []
+        errors = validate_schema({key: table}).errors
+        table.foreign_keys = foreign_keys
+        if errors:
+            del preview[key]
+            omissions.extend(f"Table omitted: {error}" for error in errors)
+    if not preview:
+        return preview, tuple(omissions)
+    result = validate_schema(preview)
+    omissions.extend(f"Relationship omitted: {error}" for error in result.errors)
+    for table in preview.values():
+        table.foreign_keys = []
+        table.constraint_types = {
+            name: kind
+            for name, kind in table.constraint_types.items()
+            if kind != "foreign_key"
+        }
+    for relation in result.relationships:
+        preview[relation.table].add_foreign_key(
+            ForeignKey(relation.columns, relation.ref_table, relation.ref_columns),
+            constraint_name=relation.name or None,
+        )
+    return preview, tuple(omissions)

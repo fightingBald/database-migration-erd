@@ -6,10 +6,14 @@ from sqlglot.tokens import Token, TokenType
 
 
 class SQLLexError(ValueError):
-    def __init__(self, line: int):
-        super().__init__(
+    def __init__(
+        self,
+        line: int,
+        message: str = (
             "Unterminated SQL token or invalid quoted literal; check dollar quotes, strings and comments"
-        )
+        ),
+    ):
+        super().__init__(message)
         self.line = line
 
 
@@ -37,12 +41,31 @@ def tokenize_sql(sql: str) -> list[Token]:
 def split_sql_statements(sql: str) -> list[str]:
     statements = []
     start = 0
-    for token in tokenize_sql(sql):
-        if token.token_type == TokenType.SEMICOLON:
+    tokens = tokenize_sql(sql)
+    token_start = depth = 0
+    routine = False
+    for i, token in enumerate(tokens):
+        if i == token_start:
+            routine = routine_kind(tokens[i : i + 4]) is not None
+        # SQL-language routine bodies are not necessarily quoted. Keep their
+        # statements opaque just like dollar strings; CASE has its own END.
+        if routine and starts_with(tokens[i : i + 2], "BEGIN", "ATOMIC"):
+            depth += 1
+        elif depth and is_word(token, "CASE"):
+            depth += 1
+        elif depth and is_word(token, "END"):
+            depth -= 1
+        if token.token_type == TokenType.SEMICOLON and not depth:
             statement = sql[start : token.start].strip()
             if statement:
                 statements.append(statement)
             start = token.end + 1
+            token_start = i + 1
+    if depth:
+        raise SQLLexError(
+            tokens[token_start].line,
+            "Unterminated SQL routine body; expected END for BEGIN ATOMIC",
+        )
     tail = sql[start:].strip()
     if tail:
         statements.append(tail)
@@ -60,4 +83,16 @@ def is_word(token: Token, word: str) -> bool:
 def starts_with(tokens: list[Token], *words: str) -> bool:
     return len(tokens) >= len(words) and all(
         is_word(token, word) for token, word in zip(tokens, words)
+    )
+
+
+def routine_kind(tokens: list[Token]) -> str | None:
+    if starts_with(tokens, "CREATE", "OR", "REPLACE"):
+        tokens = tokens[3:]
+    elif starts_with(tokens, "CREATE"):
+        tokens = tokens[1:]
+    else:
+        return None
+    return next(
+        (kind for kind in ("FUNCTION", "PROCEDURE") if starts_with(tokens, kind)), None
     )

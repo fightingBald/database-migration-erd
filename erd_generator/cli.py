@@ -14,6 +14,7 @@ from .d2_styles import STYLES
 from .diagnostics import ParseFailure
 from .fk_config import apply_foreign_key_config, load_foreign_key_config
 from .sql_parser import load_schema_result
+from .validation import preview_schema
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Label cross-group target tables and keys beside source FK fields",
     )
     d2.add_argument(
+        "--hide-indexes",
+        dest="show_indexes",
+        action="store_false",
+        help="Hide index descriptions below tables; retain tooltip details",
+    )
+    d2.add_argument(
         "--render", choices=["svg"], help="Also render a same-stem SVG with ELK"
     )
     d2.add_argument("--d2-binary", help="D2 executable (render only; default: d2)")
@@ -174,9 +181,30 @@ def _write_failure_log(failures: list[ParseFailure], log_root: str | None) -> No
 
 def run_cli(args: argparse.Namespace) -> int:
     written_source: Path | None = None
+    incomplete = False
     try:
+        output = Path(args.out).expanduser().resolve()
+        source_output = (
+            output.with_suffix(".d2") if output.suffix.lower() == ".svg" else output
+        )
+        svg_output = (
+            output if output.suffix.lower() == ".svg" else output.with_suffix(".svg")
+        )
+        partial_source = source_output.with_suffix(".partial.d2")
+        partial_svg = svg_output.with_suffix(".partial.svg")
+        # A preview belongs to one attempt. Never leave an older preview looking
+        # current when the next attempt cannot produce a drawable schema.
+        partial_source.unlink(missing_ok=True)
+        partial_svg.unlink(missing_ok=True)
         result = load_schema_result(args.migrations)
         schema, failures = result.schema, result.failures
+        if result.skipped:
+            LOGGER.info(
+                "SQL skipped for ERD: %s",
+                ", ".join(
+                    f"{kind}={count}" for kind, count in sorted(result.skipped.items())
+                ),
+            )
         entries, config_source = load_foreign_key_config(args.fk_config, failures)
         apply_foreign_key_config(
             schema,
@@ -184,31 +212,35 @@ def run_cli(args: argparse.Namespace) -> int:
             config_source=config_source,
             failures=failures,
         )
+        preview, omissions = preview_schema(schema)
+        failures.extend(ParseFailure(None, "", reason) for reason in omissions)
+        incomplete = any(f.severity == "error" for f in failures)
+        if incomplete:
+            schema = preview
+            source_output, svg_output = partial_source, partial_svg
+            if args.layout_config:
+                failures.append(
+                    ParseFailure(
+                        args.layout_config,
+                        "",
+                        "Layout overrides omitted for incomplete preview",
+                        severity="warning",
+                    )
+                )
         _write_failure_log(failures, args.log_dir)
-        if any(f.severity == "error" for f in failures):
-            raise ValueError(
-                "schema loading failed; resolve the reported SQL/configuration diagnostics before generating D2"
-            )
         if not schema:
             raise ValueError(
                 "no tables detected; check migration input and SQL support"
             )
-        output = Path(args.out).expanduser().resolve()
         from .d2 import build_d2
         from .layout_config import load_layout_config
 
         layout_config = (
             load_layout_config(args.layout_config)
-            if args.layout_config is not None
+            if args.layout_config is not None and not incomplete
             else None
         )
 
-        source_output = (
-            output.with_suffix(".d2") if output.suffix.lower() == ".svg" else output
-        )
-        svg_output = (
-            output if output.suffix.lower() == ".svg" else output.with_suffix(".svg")
-        )
         source = build_d2(
             schema,
             show_types=args.show_types,
@@ -217,7 +249,12 @@ def run_cli(args: argparse.Namespace) -> int:
             grouping=args.grouping,
             layout_config=layout_config,
             show_references=args.show_references,
+            show_indexes=args.show_indexes,
         )
+        if incomplete:
+            from .d2_emit import incomplete_notice
+
+            source += incomplete_notice(schema, len(failures))
         LOGGER.info(
             "D2 layout: grouping=%s layout_overrides=%d reference_labels=%s",
             args.grouping,
@@ -227,36 +264,53 @@ def run_cli(args: argparse.Namespace) -> int:
         _write_source(source_output, source)
         written_source = source_output
         if args.render:
-            from .d2_refinement import render_optimized
-
-            render_optimized(
-                schema,
-                source_output,
-                svg_output,
-                D2RenderConfig(
-                    executable=args.d2_binary or "d2",
-                    timeout=args.render_timeout
-                    if args.render_timeout is not None
-                    else 120,
-                    force_appendix=args.force_appendix,
-                ),
-                show_types=args.show_types,
-                direction=args.direction,
-                style=args.style,
-                grouping=args.grouping,
-                layout_config=layout_config,
-                show_references=args.show_references,
+            config = D2RenderConfig(
+                executable=args.d2_binary or "d2",
+                timeout=args.render_timeout if args.render_timeout is not None else 120,
+                force_appendix=args.force_appendix,
             )
+            if incomplete:
+                from .d2_renderer import render_d2
+
+                # Keep the warning in the native source/SVG; previews use one
+                # rendering pass rather than regenerating layout candidates.
+                render_d2(source_output, svg_output, config)
+            else:
+                from .d2_refinement import render_optimized
+
+                render_optimized(
+                    schema,
+                    source_output,
+                    svg_output,
+                    config,
+                    show_types=args.show_types,
+                    direction=args.direction,
+                    style=args.style,
+                    grouping=args.grouping,
+                    layout_config=layout_config,
+                    show_references=args.show_references,
+                    show_indexes=args.show_indexes,
+                )
         LOGGER.info(
-            "ERD generated: tables=%d columns=%d foreign_keys=%d",
+            "ERD %s: tables=%d columns=%d foreign_keys=%d",
+            "incomplete preview" if incomplete else "generated",
             len(schema),
             sum(len(t.columns) for t in schema.values()),
             sum(len(t.foreign_keys) for t in schema.values()),
         )
-        print(f"Diagram written to {source_output}")
+        print(
+            f"{'Partial D2 preview' if incomplete else 'Diagram'} written to {source_output}"
+        )
         if args.render:
-            print(f"SVG written to {svg_output}")
-        return 0
+            print(
+                f"{'Partial SVG preview' if incomplete else 'SVG'} written to {svg_output}"
+            )
+        if incomplete:
+            print(
+                "ERD incomplete: partial preview only; requested outputs were not updated.",
+                file=sys.stderr,
+            )
+        return 1 if incomplete else 0
     except (ValueError, OSError, D2RenderError) as exc:
         message = (
             "input is not valid UTF-8" if isinstance(exc, UnicodeError) else str(exc)
@@ -264,7 +318,9 @@ def run_cli(args: argparse.Namespace) -> int:
         print(f"ERD generation failed: {message}", file=sys.stderr)
         if written_source is not None and args.render:
             print(
-                f"D2 source retained at {written_source}; SVG was not updated.",
+                f"Partial D2 source retained at {written_source}; no current partial SVG was generated."
+                if incomplete
+                else f"D2 source retained at {written_source}; SVG was not updated.",
                 file=sys.stderr,
             )
         return 1
