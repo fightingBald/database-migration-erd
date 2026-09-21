@@ -1,296 +1,12 @@
 # Developer guide
 
-CLI reference, schema behavior and contributor workflows. For installation and everyday use, see the [README](README.md).
-
-## Environment
-
-Use Python **3.11+** and **D2 0.7.1**. Local validation used Python 3.14; CI is configured for 3.11 and 3.14. Rendering checks the exact D2 version to keep layout behavior reproducible; both `0.7.1` and `v0.7.1` version strings are accepted.
-
-Download D2 from the [official 0.7.1 release](https://github.com/d2lang/d2/releases/tag/v0.7.1). ELK is included; no separate ELK service is needed. `requirements.txt` installs only sqlglot and PyYAML; `requirements-dev.txt` also installs pytest and Ruff.
-
-## CLI reference
-
-```bash
-python -m erd_generator SQL_DIR OUTPUT
-```
-
-Both paths are required. `SQL_DIR` is the migration directory. The output extension selects what to generate:
-
-| Output | Files written | D2 executable required? |
-| --- | --- | --- |
-| `./generated/schema.svg` | `schema.svg` and `schema.d2` in `./generated/` | Yes |
-| `./generated/schema.d2` | `schema.d2` only | No |
-
-The short command defaults to ELK, clean styling, automatic business/relationship grouping, compact component placement, rightward layout and visible column types. FK and layout YAML are loaded only when explicitly supplied. No example relationships or input/output paths are selected implicitly.
-
-Optional overrides follow the two paths:
-
-```bash
-python -m erd_generator ./migrations ./generated/schema.svg --fk-config ./fk.yaml
-python -m erd_generator ./migrations ./generated/schema.svg --direction down
-python -m erd_generator ./migrations ./generated/schema.d2 --hide-types
-```
-
-Quote paths containing spaces. Generated files are overwritten by regeneration; edit migrations, FK configuration or generation options rather than the generated files.
-
-| Option | Behavior |
-| --- | --- |
-| `--style clean\|classic` | D2 visual preset, default `clean`; `classic` restores the original appearance |
-| `--hide-types` | Hide SQL column types; retain names and constraints |
-| `--show-types` | Explicitly display SQL column types; already enabled for the short command |
-| `--fk-config PATH` | Add relationships declared in YAML |
-| `--layout-config PATH` | Optional business-group, title and colour overrides; see [business layout](#business-layout) |
-| `--show-references` | Show cross-group target tables and keys beside source FK fields; off by default |
-| `--direction right\|left\|up\|down` | ELK layout direction, default `right`; after grouping, FK arrows can point either way while retaining their actual meaning |
-| `--grouping auto\|none` | Infer business/relationship groups and balance shared hubs, default `auto`; `none` disables those inferences while retaining explicit layout groups and independent component packing |
-| `--d2-binary PATH` | Rendering executable, default `d2`; requires SVG output |
-| `--render-timeout SECONDS` | Positive timeout per D2 process, default 120; requires SVG output |
-| `--force-appendix` | Display tooltip contents in the SVG appendix; requires SVG output |
-| `--log-dir PATH` | Write detected SQL/configuration diagnostics to `PATH/parse_log/`; default working directory |
-
-The main command logs table, column and foreign-key counts, rendering version/layout and duration. Invalid options return exit code 2; generation/rendering errors return 1; complete requested output returns 0.
-
-Existing named commands remain supported, including `--render svg` with a `.d2` output:
-
-```bash
-python -m erd_generator --migrations ./migrations --out ./generated/schema.d2 --show-types --render svg
-```
-
-Use either the two positional paths or `--migrations` plus `--out`; mixing them is rejected. With named paths, column types are hidden unless `--show-types` is supplied, and a `.d2` output does not render unless `--render svg` is supplied. Named `--out` also accepts `.svg`. CLI and Python `erd_generator.main()` use the same D2-only workflow.
-
-Breaking change: draw.io export, XML extraction/comparison, their scripts and Python export have been removed. `--format`, `--layout`, `--per-row` and `--graphviz-*` are no longer accepted; ELK is fixed. Switch old invocations to `python -m erd_generator SQL_DIR OUTPUT`. There are no compatibility aliases. To restore the removed functionality, restore the previous project version and its dependencies; no database rollback is involved.
-
-## Table and relationship behavior
-
-- The default `clean` style uses blue-grey headers, white table bodies, light separators, dark field names, muted types, teal constraint markers and rounded slate-coloured connections. Connection labels use regular text. The palette and styles are embedded in the D2 source.
-- Each table is a D2 `sql_table`; fully qualified names are quoted as one key.
-- Primary and foreign-key columns receive PK/FK markers, including both on the same column.
-- Single-column, unconditional unique constraints/indexes receive UNQ markers. Composite, partial and expression indexes remain in the notes without incorrectly marking individual columns unique.
-- Foreign-key arrows point from referencing columns to referenced columns. Explicit composite keys create one connector per column pair, labeled with a common constraint and pair number.
-- Repeated FK declarations are deduplicated. Columns retain their Schema order; table, relationship and note ordering is deterministic.
-- Primary keys, complete foreign keys and indexes (including available names, methods and predicates) appear in table tooltips. `--force-appendix` makes the notes visible without hovering.
-- Self references have explicit `source_column → target_column` labels: D2 0.7.1/ELK may route self loops to table boundaries rather than exact row ports. The project renderer sets `--elk-nodeSelfLoop=100` to leave room for these labels.
-
-D2 handles text quoting, including reserved keywords, dots, quotes, backslashes, Unicode and literal `${...}` sequences.
-
-See [D2 SQL tables](https://d2lang.com/tour/sql-tables/) and [ELK](https://d2lang.com/tour/elk/) for the upstream rendering model.
-
-Use `--style classic` to restore the original D2 appearance. Both presets preserve the same column definitions, constraints and relationship endpoints. The implementation uses [native D2 styles](https://d2lang.com/tour/style/) and [theme overrides](https://d2lang.com/tour/themes/).
-
-### Cross-group reference labels
-
-To read the target of a cross-group FK directly at its source field:
-
-```bash
-python -m erd_generator ./migrations ./generated/schema.svg --show-references
-```
-
-The source row displays, for example, `member_id | BIGINT | FK → members.id`. This also works for source-only `.d2` output and with `--hide-types`. Table names, column names, types, PK/UNQ markers and all actual FK arrows remain intact.
-
-- Only relationships between top-level business or relationship groups are annotated. Inner communities within one business group and self references retain ordinary FK markers. Explicit layout groups still apply with `--grouping none`; without explicit groups, that option leaves no cross-group FKs to annotate.
-- A composite FK labels each source column with its corresponding target column. Multiple external targets on one column are sorted and deduplicated in the marker; the actual constraints and arrows are preserved.
-- Conventional qualified table names omit their schema when the short name is unique across the diagram. Same-named tables retain qualification; unusual identifiers are kept verbatim. Full relationship details remain in table tooltips.
-- Labels use native D2 SQL-table constraint text so D2 includes their width when sizing tables. Floating arrowhead labels are avoided because [D2 does not include them in automatic label placement](https://d2lang.com/tour/connections/).
-
-This improves local reference lookup, not graph compactness: long names or many targets can widen tables and the canvas. It does not hide cross-group lines. The option is therefore off by default. Omit it to restore the original display, or use `show_references=False` in `build_d2()` and `render_optimized()`. No input migration or database rollback is needed. SVG layout comparison preserves the option in both candidates.
-
-### Compact placement
-
-Disconnected tables and independent relationship groups are packed automatically. No extra command-line option is required:
-
-- Tables linked by any validated FK, including YAML relationships, stay inside one packed region. Business-group membership can join otherwise independent components into the same region without inventing FKs. Self references stay with their table.
-- Within each region, native ELK places and routes connected business groups and relationship communities. Tables without enough naming or relationship evidence retain their previous flat D2 structure.
-- For multiple groups, a pure planner estimates their sizes from names, column counts/types and relationship layers. It compares column counts, balancing the overall aspect ratio and unused area, and places taller groups first to balance column heights.
-- Invisible D2 containers separate the outer grid from each group's ELK layout. Tables retain their natural dimensions and font sizes; putting SQL tables directly into a grid would stretch rows/widths, and putting FK endpoints directly in separate grid cells would lose ELK routing. See [D2 grid behavior](https://d2lang.com/tour/grid-diagrams/).
-- The renderer uses 16-unit ELK container padding; grids use 48-unit gaps. Sorting and tie-breaking are deterministic. `.d2` generation needs no D2 executable, and layout planning uses only the standard library without mutating Schema.
-
-Size estimates guide packing; they are not a guaranteed canvas ratio. A single large connected graph, exceptionally long labels or one very tall table can still make a wide/tall diagram. A connected graph is not split into grid cells just to meet an aspect ratio. `--direction` controls the ELK layout axis, and `--style classic` changes appearance while keeping automatic packing.
-
-The renderer sets ELK's `nodeNodeBetweenLayers=50` and `edgeNodeBetweenLayers=25`, with container padding 16 and self-loop spacing 100. This reduces routing space without changing grouping, fonts, columns or FK endpoints and requires no additional renders. Comparative integration tests render the same D2 source with the previous 70/40 spacing and check area, routed lengths, overlaps and field endpoints across isolated, chain, star, community, composite-cycle graphs in both horizontal and vertical directions. Route lengths are estimates from SVG path/control points, not exact curve lengths. Smaller area alone does not establish a better layout; long routes, crossings and readability must also be reviewed.
-
-Spacing rollback: restore the two renderer flags to `--elk-nodeNodeBetweenLayers=70` and `--elk-edgeNodeBetweenLayers=40`, then regenerate the SVG. D2 source and SQL are unchanged. When rendering D2 source directly, supply the same spacing and padding flags to reproduce the project's SVG placement.
-
-#### Rendered layout comparison
-
-The SVG command can perform **one additional ELK render** when automatic grouping is enabled, there are at least 12 tables, and the first diagram has less than 18% table coverage or an aspect ratio above 2:1. Small diagrams, appendices, disabled automatic grouping and identical candidate sources keep a single render.
-
-The candidate retains business membership, titles, colours and the chosen direction. It removes inner community containers and uses ordinary graph colouring inside groups instead of centering their hubs. These constraints can add unnecessary layers in heavily connected regions. The original layout remains the baseline: simplification is not an unconditional replacement.
-
-A candidate must reduce canvas area by at least 5%, without increasing the longest canvas side, total routed length or longest route. Its aspect ratio must remain within 2:1, or be no more elongated than an already elongated baseline. The orthogonal crossing estimate can increase by at most 5%, with a two-crossing allowance on small counts. Route lengths use SVG path/control points and crossing counts are a proxy; these guards do not prove globally optimal placement or improvement in every aesthetic measure.
-
-Before selection, verification checks tables, column names/types, business membership, overlaps, clipping, connection count and directed field endpoints. The existing self-loop boundary limitation still applies. Candidate render/verification failures retain the successful baseline and produce a warning. If baseline geometry cannot be measured, comparison is skipped with a warning. A failed baseline render preserves the previous SVG. The configured timeout remains per D2 process, so a comparison can roughly double rendering time.
-
-The selected SVG is published **without coordinate editing** together with its matching D2 source. Each file is replaced atomically; a publication error can leave fresh D2 alongside the previous SVG, and the CLI reports failure. Temporary comparison files are removed. Source-only generation stays deterministic and requires no executable; it produces the balanced baseline, which can differ from the source selected during SVG generation. `build_d2(..., layout_strategy="compact")` exposes the candidate for Python callers; it is not a promise that the candidate will be better. The default `"balanced"` strategy preserves the original builder behavior.
-
-To bypass comparison while retaining the baseline grouping, generate `.d2` only and render it with the existing `render_d2` Python function:
-
-```python
-from pathlib import Path
-from erd_generator.d2_renderer import render_d2
-
-render_d2(Path("generated/schema.d2"), Path("generated/schema.svg"))
-```
-
-`--grouping none` also disables comparison along with automatic grouping. No SQL or database rollback is involved.
-
-Migration/rollback: generated D2 for disconnected graphs now nests objects under invisible `_erd_column_*` / `_erd_component_*` containers. Visible SQL names, columns, tooltips and FK meanings remain unchanged, but scripts referencing absolute D2 object paths must account for the new prefixes. Use the generator's SVG command for the configured spacing; invoking D2 manually without the padding flag uses D2's larger default container margins. Reverting the compact-layout change and regenerating restores the earlier flat layout; no SQL migration or database rollback is needed.
-
-### Business layout
-
-Tests use synthetic SQL and graph data. Keep real customer/company SQL, identifiers, local paths and generated diagrams out of tests and documentation. Test inputs belong in temporary directories or focused regression fixtures; user migrations and rendering reports stay outside version control.
-
-Automatic business grouping needs no YAML or additional command options. Repeated word prefixes such as `books_*`, `loans_*` and `members_*` can produce named regions with a title, subtle background and matching table headers. Namespace-qualified titles distinguish the same family in different schemas. Colours are derived from stable group identifiers, so unrelated groups do not rotate the palette. Titles also identify groups when colours are similar.
-
-The deterministic rules are deliberately conservative:
-
-- A family needs at least three tables and meaningful suffix variation, or a root table with meaningful descendants. Matching uses underscore word boundaries and keeps database namespaces separate; it does not confuse `books_*` with `bookshelf_*`.
-- Numeric/version-only suffixes do not establish business meaning. Common `t`/`tb`/`tbl`/`table` prefixes are skipped. A rootless wrapper containing multiple eligible subfamilies yields the more specific families; this decision uses that prefix's own subtree, not unrelated table counts.
-- Strong, distributed external relationships can reject a misleading naming family. Repeated constraints, composite-key width and self references do not inflate this evidence. Widely shared hubs are discounted instead of making every named domain appear incoherent.
-- Clear naming can group tables without any FK. Weak or conflicting names fall back to neutral relationship communities and independent-table packing. No business descriptions or foreign keys are invented, and no model/network call is involved.
-- The balanced baseline retains inferred communities inside large named regions. The rendered comparison can select a simpler interior. At most one business level and one inner community level are emitted; all ancestor-level FK endpoints remain outside cross-cell grids.
-
-These are presentation inferences, not business-domain declarations extracted from SQL. `t001`-style names cannot reveal their business meaning. Adding or removing related tables can change inferred membership and geometry; identical input/configuration remains deterministic.
-
-To correct an exception, create a small override file and pass it explicitly:
-
-```bash
-python -m erd_generator ./migrations ./generated/schema.svg --layout-config ./erd-layout.yaml
-```
-
-```yaml
-groups:
-  books:
-    tables: ["demo_library.books"]
-    label: Books
-    color: blue
-  loans:
-    tables: ["demo_library.loans", "demo_library.loan_*"]
-    color: gold
-```
-
-Only `tables` is required per group. `label` defaults to the group key; region titles show the label without an appended table count. Colour is automatic unless overridden with `blue`, `gold`, `green`, `violet`, `slate`, `rose`, `teal` or `orange`. Colours apply to the region and its table headers with either clean or classic styling. Unmatched tables continue to be inferred automatically. Explicit membership is never changed by inference or hub placement, and a group can contain tables from separate FK components.
-
-Selectors first match an exact Schema table name, then use case-sensitive shell-style wildcards (`*`, `?`, `[abc]`). Use complete qualified names; there is no unqualified-name fallback. Exact names containing wildcard characters take precedence. Overlaps between groups, zero-match selectors, empty files/groups/lists, unknown fields, invalid values, duplicate YAML keys and YAML merge keys are errors. These errors are reported before either existing output is replaced. There is no implicit configuration-file search.
-
-For Python callers, use `build_d2(schema, layout_config=load_layout_config(path))`, importing `load_layout_config` from `erd_generator.layout_config`. Direct immutable `LayoutConfig`/`GroupRule` values are also supported. File loading stays outside the pure D2 builder; source-only generation still needs no D2 executable.
-
-To roll back automatic business/community/hub layout, add `--grouping none`. Explicit overrides remain active; remove `--layout-config` as well to restore the ungrouped workflow. Generated D2 may gain stable `_erd_group_*` prefixes; continue regenerating rather than relying on old object paths. SVG paths and the CI publication sequence are unchanged.
-
-### Related-table grouping
-
-The default `--grouping auto` also examines remaining connected components and the interiors of business regions with **12 or more tables**:
-
-- A pure greedy modularity calculation groups tables with many internal links and relatively few links to the rest of the graph. Each table pair contributes once; FK direction, duplicate/parallel constraints, composite key width and self references do not distort grouping.
-- Grouping requires at least two groups containing three or more tables and modularity of at least 0.15. Small diagrams, a single star and graphs without sufficiently distinct communities keep their previous layout.
-- A shared table linked to at least six neighbors across three or more groups, with fewer than half its neighbors in its assigned group, is placed separately. This avoids arbitrarily attaching a common identity/tenant table to one inferred domain.
-- Related tables are nested in invisible **regular D2 containers**. Native ELK routes both internal and cross-group edges. These connected groups never become separate grid cells, which would replace ELK routing with straight center-to-center segments.
-- Deterministic graph coloring orders adjacent tables and groups into a few layers. The D2 emitter uses both `child -> parent` and `parent <- child` so layout need not follow one long FK chain. Arrowheads still point from the referencing field to the referenced field; every FK, composite pair, column marker and tooltip is retained.
-- Singleton groups linked to at least three other groups are preferred candidates for a central band; when there are no singleton candidates, business groups can also be hubs. Adjacent hubs receive distinct layers. After removing the hubs, independent components can rotate their layer assignments to balance estimated sizes. Even one linked pair no longer forces all other neighbors onto the same side.
-- Inside a group, the planner compares ordinary layering with centering its most connected tables. It estimates dimensions using column counts, label widths, visible types and the selected direction, then scores area with a penalty for elongated shapes. It retains ordinary layering on ties or when centering would score worse. This performs no extra D2 renders and does not shrink fonts, hide fields or change group membership.
-
-This relationship-community stage uses declared or configured FKs; the separate business-family stage also uses names. Neither stage invents missing FKs. Large hubs, dense relationships and long labels can still create long routes; automatic grouping does not guarantee the best layout for every schema. ELK may enlarge heavily connected tables to make space for ports. Use existing `--fk-config` support when meaningful relationships are absent from SQL.
-
-No additional runtime dependency or D2 executable is needed for source generation. The planner is deterministic and does not modify Schema. Validation checks rendered table regions, FK field rows and actual SVG arrowheads, not just D2 strings. A 40-table / 71-FK regression fixture also compares canvas area and routed lengths against `--grouping none`.
-
-Migration/rollback: grouped D2 adds `_erd_group_*` object-path prefixes and may use `<-` as well as `->`. Tools reading generated D2 must account for both connection directions. Add `--grouping none` (or `build_d2(..., grouping="none")`) and regenerate to restore the previous connected-graph layout. Disconnected component packing and SQL processing are unaffected; no database rollback is involved.
-
-## Relationships without database FK constraints
-
-Three sources are supported:
-
-1. Native inline or table-level `FOREIGN KEY` definitions.
-2. Column comments such as `-- FK demo_library.members(id)`.
-3. Additional YAML relationships supplied through `--fk-config`.
-
-```yaml
-demo_library.members:
-  fks:
-    - [membership_type_id, demo_library.membership_types, id]
-    - [sponsor_id, demo_library.members, id]
-
-demo_library.loan_items:
-  fks:
-    - [loan_id, demo_library.loans, id]
-    - [book_id, demo_library.books, id]
-```
-
-Each triple is `[local_column, target_table, target_column]`. Composite relationships use `[[tenant_id, user_id], memberships, [tenant_id, id]]`. The historical two-item YAML shorthand `[id, target_table]` means the same column name on both sides.
-
-A short table name must resolve unambiguously. Wrong qualified names, unknown columns and malformed entries fail generation; use explicit qualified names when schemas share table names. YAML adds relationships and does not replace conflicting SQL declarations.
-
-SQL `REFERENCES table` without column names is supported when the target has a single primary-key column. Omitted composite references fail clearly because the existing Schema stores primary keys as an unordered set; it cannot safely infer the declaration order. Explicit composite reference columns are supported.
-
-## PostgreSQL blocks and setup statements
-
-Statement splitting uses the pinned sqlglot PostgreSQL tokenizer. It preserves `$$...$$` and `$tag$...$tag$` literals, quoted strings/identifiers and nested block comments, so their internal semicolons do not split statements. Tags are case-sensitive. Unterminated tokens produce a sanitized diagnostic with the input file and statement line.
-
-| Input | ERD behavior |
-| --- | --- |
-| `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES` | Skip permission changes. |
-| `CREATE ROLE`, `CREATE USER` | Skip account creation; credentials are not logged. |
-| Standalone `CREATE SCHEMA`, including `IF NOT EXISTS` and `AUTHORIZATION` | Skip the namespace declaration. |
-| `CREATE FUNCTION` / `CREATE PROCEDURE` with ordinary string or dollar-quoted bodies | Skip the definition; never apply its body as if the routine had been called. |
-| Dollar-quoted, straight-line PL/pgSQL `DO ... BEGIN ... END` | Apply the existing supported table/index DDL subset in order. Permission/setup commands, `NULL` and literal-only `RAISE NOTICE`/`INFO`/`DEBUG`/`LOG`/`WARNING` statements are skipped. |
-| Wholly ERD-neutral `DO` blocks with role checks or `EXECUTE format(...)` | Skip only after checking every branch, command template and argument against the rules below. |
-| Other conditional/dynamic blocks, declarations, loops, nested `BEGIN` blocks, exception handlers or calls | Report unsupported input; do not assume which schema changes occur. |
-| `CREATE SCHEMA` containing object definitions, `ALTER SCHEMA`, `DROP SCHEMA` | Report unsupported input; these can change diagram objects. |
-
-For example, this static block is supported:
-
-```sql
-CREATE SCHEMA app;
-DO $migration$
-BEGIN
-    CREATE TABLE app.items (id integer PRIMARY KEY);
-    ALTER TABLE app.items ADD COLUMN label text;
-END;
-$migration$;
-```
-
-The optional `LANGUAGE plpgsql` clause may appear before or after the dollar-quoted body. The final `END` may omit its semicolon. Migration comments such as `-- +migrate StatementBegin` and `-- +migrate StatementEnd` remain comments.
-
-Common role/permission setup is supported, including the complete [library reader migration regression fixture](tests/fixtures/postgres_role_setup.sql):
-
-```sql
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'demo_library_reader') THEN
-        CREATE ROLE demo_library_reader NOLOGIN;
-    END IF;
-    EXECUTE format('GRANT CONNECT ON DATABASE %I TO demo_library_reader', CURRENT_DATABASE());
-END
-$$;
-```
-
-The neutral-block allowlist has deliberately bounded rules:
-
-- Conditions may be `TRUE`/`FALSE`, optionally preceded by `NOT`, or `[NOT] EXISTS (SELECT ... FROM pg_roles WHERE rolname = 'name')`. `pg_authid`/`rolname` and `pg_user`/`usename` also qualify; `pg_catalog.` is optional. The SELECT list may be empty, `1`, `*` or the name column. Aliases, joins, additional predicates and arbitrary functions are unsupported.
-- `IF`/`ELSIF`/`ELSE` and nested `IF` are checked across **all** branches; no condition is evaluated. Every statement must be one of the setup/no-op commands above or an accepted `EXECUTE`. A block mixing these conditional/dynamic constructs with table/index DDL remains unsupported.
-- `EXECUTE` accepts an ordinary/dollar-quoted constant SQL string or `format`/`pg_catalog.format` with a constant template. Every SQL command in that string must be ERD-neutral. A template containing both a grant and a table change is rejected.
-- Supported format slots are `%I`, `%L`, positional forms such as `%1$I`, and `%%`. Slots must occupy complete SQL tokens outside existing strings, quoted identifiers or comments. `%s`, width/flags, concatenation, variable templates and `USING` are unsupported. These boundaries follow PostgreSQL's [format quoting rules](https://www.postgresql.org/docs/current/functions-string.html#FUNCTIONS-STRING-FORMAT).
-- Arguments may be ordinary/dollar-quoted string literals, `CURRENT_USER`, `CURRENT_ROLE`, `SESSION_USER`, `CURRENT_DATABASE()` or `CURRENT_SCHEMA()`; the two function calls may use `pg_catalog.`. Every argument is checked, including unused ones. Arbitrary calls, subqueries and casts are rejected.
-
-This is static schema extraction, not a PL/pgSQL interpreter or a database execution check. Loops, `CALL`, `PERFORM`, declarations and nested `DO` remain unsupported. The rules assume standard PostgreSQL catalog/builtin semantics; unqualified names retain the parser's existing `search_path` limitations. Use qualified names when schema identity matters.
-
-Supported `DO` blocks containing structural DDL are applied to a temporary Schema copy. If any statement in the block fails, none of its changes reach the caller's Schema. The loader can still collect later statements for diagnostics, but any error prevents D2/SVG output from being replaced. Use ordinary DDL or a reviewed schema snapshot for migrations whose structural effects require runtime evaluation; there is no option to silently ignore unknown blocks.
-
-The allowlist classifies structural impact and does not validate every PostgreSQL permission or role option. Skipped command categories and static block completion are logged at DEBUG without SQL payloads. No additional dependencies, CLI flags or database connection are required. Reverting the neutral-block extension restores the previous rejection of conditional/dynamic blocks while retaining dollar quoting and static DDL support; no database rollback is involved.
-
-## Migration loading and errors
-
-Versioned files named `V<number>__description.sql` are ordered numerically, including dot/underscore version components; `V2` precedes `V10`. Non-versioned filenames follow versioned files in path order. This is a file ordering contract, not a complete Flyway migration-history implementation. Keep version names unique and include the complete migration history.
-
-The loader reads UTF-8 strictly. The D2 workflow stops on detected SQL/configuration failures or invalid relationships before overwriting source output. Diagnostics include file/object context and omit SQL/YAML payloads from generator console/file logs.
-
-Rendering explicitly requests ELK and ignores ambient `D2_*`/`ELK_*` environment configuration. It has no fallback to another backend or layout. SVG is rendered to a temporary file and verified before replacing the target. If rendering fails, the generated `.d2` is retained, the previous SVG is unchanged, and the command reports that the SVG was not updated. Source and SVG replacement are separate operations; automation must check the exit code.
-
-No SQL or diagram is uploaded to an online service by these commands.
+See the [README](README.md) for installation and everyday use. This guide covers project integration, configuration and development. For the full CLI reference, run `python -m erd_generator --help`.
 
 ## Use inside an existing project
 
-Place the tool's source, dependency files, tests and `.gitignore` under `tools/erd-generator/`. Keep the source repository's `.git/` directory and local environments, inputs and generated files out of the copy. `.gitignore` controls Git tracking; it does not filter files during a filesystem copy.
+Copy the source, dependency files, tests and `.gitignore` into `tools/erd-generator/`. Exclude the original `.git/`, virtual environments, local SQL and generated files; `.gitignore` does not filter a filesystem copy.
 
-Prepare the Python environment using the README installation steps from that directory, and install D2 0.7.1. From the parent project's root, its existing codegen script can invoke:
+Follow the README installation steps inside that directory. From the parent project's root, call this from its existing codegen script:
 
 ```bash
 PYTHONPATH=./tools/erd-generator \
@@ -299,144 +15,124 @@ PYTHONPATH=./tools/erd-generator \
   --log-dir ./tools/erd-generator
 ```
 
-Replace the two input/output paths with the project's actual paths and propagate a nonzero exit code to codegen. The log directory keeps diagnostics under the tool's ignored `parse_log/` directory.
+Replace the SQL and output paths, and propagate a nonzero exit code. Rendering requires **D2 0.7.1** with bundled ELK; `.d2` output alone needs no D2 executable.
 
-Keep the nested `.gitignore` with the tool. Its rules exclude the tool's virtual environments, caches, build/coverage outputs, generated diagrams, diagnostics and local planning/input files. Runtime code, dependency declarations and regression tests remain tracked. Rooted rules such as `/migrations/` apply inside the tool directory, so they do not ignore the parent project's migration SQL.
-
-For output outside the tool directory, add the exact generated paths to the **parent project's** `.gitignore`, for example:
+Keep the tool's `.gitignore`; its rooted rules apply inside `tools/erd-generator/`, so they do not ignore the parent project's migrations. Add outputs outside that directory to the **parent project's** `.gitignore`:
 
 ```gitignore
 /docs-site/static/img/schema.svg
 /docs-site/static/img/schema.d2
 ```
 
-An ignore rule does not untrack an existing file. Use `git rm --cached -- <generated-path>` to remove a previously committed artifact from tracking while retaining the local file. Removing a rule makes future files eligible for tracking again; it does not restore files removed from the index.
+For already tracked outputs, use `git rm --cached -- <generated-path>` to untrack them while keeping local files.
 
 ## CI and Docusaurus
 
-Run the generator before each documentation build, using the migration files from that CI checkout:
+Use this order in the application's existing pipeline:
 
 ```text
-Migration SQL → generator + D2/ELK → static/img/schema.svg → Docusaurus build → existing site deployment
+Install Python dependencies + D2 0.7.1 → run codegen → build Docusaurus → deploy site
 ```
 
-This documents the schema described by the checked-out migrations, not the live database. Include the complete migration history. No database connection, Docusaurus plugin or new generator option is needed. This repository has generation checks in [.github/workflows/check.yml](.github/workflows/check.yml), but does not contain a Docusaurus site or its deployment pipeline.
+Use the complete migration history from the CI checkout. With the embedded tool above, codegen uses the same command locally and in CI. Run generation before every documentation build and ensure SQL changes trigger the pipeline. No database connection or Docusaurus plugin is required.
 
-### Generate before building the site
-
-The following steps belong in the **application/documentation repository's existing GitHub Actions job**, after its checkout and Node setup. This example assumes an Ubuntu x64 runner, migrations in `migrations/` and an npm-based Docusaurus site with a lockfile in `docs-site/`. Change those two paths to match your repository. Keep your site's existing Node version and deployment steps.
-
-```yaml
-- name: Check out the ERD generator
-  uses: actions/checkout@v7.0.1
-  with:
-    repository: fightingBald/database_migrate_UML_generator
-    ref: 85756bb952b4ca9d70d01882b9ac5839ef718cd4
-    path: .tools/erd-generator
-- uses: actions/setup-python@v7.0.0
-  with:
-    python-version: "3.11"
-- name: Install generator dependencies
-  working-directory: ${{ github.workspace }}
-  run: python -m pip install -r .tools/erd-generator/requirements.txt
-- name: Install verified D2 with bundled ELK
-  shell: bash
-  run: |
-    archive="$RUNNER_TEMP/d2-v0.7.1-linux-amd64.tar.gz"
-    curl --fail --location --retry 2 \
-      https://github.com/d2lang/d2/releases/download/v0.7.1/d2-v0.7.1-linux-amd64.tar.gz \
-      --output "$archive"
-    echo "eb172adf59f38d1e5a70ab177591356754ffaf9bebb84e0ca8b767dfb421dad7  $archive" | sha256sum --check -
-    tar -xzf "$archive" -C "$RUNNER_TEMP"
-    echo "$RUNNER_TEMP/d2-v0.7.1/bin" >> "$GITHUB_PATH"
-- name: Generate database diagram
-  working-directory: ${{ github.workspace }}
-  env:
-    PYTHONPATH: ${{ github.workspace }}/.tools/erd-generator
-  run: python -m erd_generator ./migrations ./docs-site/static/img/schema.svg
-- name: Build Docusaurus
-  working-directory: docs-site
-  run: |
-    npm ci
-    npm run build
-```
-
-The separate checkout and `PYTHONPATH` make the module available from the application repository; the generator is not currently distributed as a pip-installable package. Pin its commit and review updates deliberately. For another CI platform, keep the same installation and generation order. ELK runs locally inside D2.
-
-### Reference the diagram
-
-Add this to a Docusaurus Markdown document, for example `docs-site/docs/database.md`:
+In a Docusaurus Markdown page, reference the generated file under `docs-site/static/img/`:
 
 ```markdown
-# Database schema
-
 ![Database tables and relationships](/img/schema.svg)
 
 [Open the full-size diagram](/img/schema.svg)
 ```
 
-Use Markdown asset references as above: Docusaurus resolves the file under `static/`, handles a non-root `baseUrl`, and hashes the bundled image URL when its contents change. Avoid hardcoding a root-relative JSX `<img src="/img/schema.svg">`. See the official [static asset reference](https://docusaurus.io/docs/markdown-features/assets#static-assets). The full-size link lets readers open large diagrams separately; the embedded preview does not add pan/zoom controls.
+Treat `.svg` and `.d2` as build outputs; CI does not need to commit them. Stop the job if generation fails. PRs can validate generation and the site build; the deployment job publishes the resulting site. If these are separate jobs, pass artifacts from the same run and require the previous job to succeed. Verify the image under the site's configured `baseUrl` before publishing.
 
-The command creates both `schema.svg` and `schema.d2`; the output directory is created automatically. Treat both as build output and ignore those generated paths in Git. Generate them before local documentation builds too. There is no need for a bot to commit updated images after each CI run.
+## Relationships without database FK constraints
 
-### Build and publication rules
+SQL foreign keys are loaded automatically. Column comments such as `-- FK demo_library.members(id)` can also declare relationships. To add relationships in YAML, pass `--fk-config ./fk.yaml`:
 
-- Run generation on every documentation CI invocation, before `npm run build`. To run on every repository push/PR, ensure the containing workflow has those triggers without a path filter that excludes SQL changes.
-- A detected SQL/configuration failure, missing D2, wrong D2 version or render failure must fail the job. Do not use `continue-on-error`, `|| true`, or an unconditional site deployment. The CLI preserves any previous SVG on failure; it must not be published as a successful regeneration.
-- PRs can validate generation and the site build. The main-branch deployment publishes the newly built site. Generating an SVG or uploading a CI artifact alone does not update an already deployed Docusaurus site.
-- If generation, build and deployment use separate jobs, pass this run's outputs through artifacts and require the preceding job to succeed. Deploy the site built from the same commit rather than fetching an unrelated latest diagram.
-- Keep a previous successful site artifact for rollback. Restoring that artifact restores both the documentation and its diagram; no database rollback is involved.
-
-Before enabling deployment, verify a clean checkout builds successfully, a schema change appears in the SVG, the diagram opens under the deployed `baseUrl`, and a generation failure prevents the site build/deployment. The repository's real-rendering tests cover SVG generation; the consuming site owns its build and deployment checks.
-
-## Repository structure
-
-```text
-SQL migrations + optional FK YAML → Schema → schema.d2 → D2 / ELK → schema.svg
+```yaml
+demo_library.loans:
+  fks:
+    - [member_id, demo_library.members, id]
+    - [book_id, demo_library.books, id]
 ```
 
-```text
-README.md             # user setup and everyday usage
-dev_guide.md          # CLI reference, architecture and contributor workflows
-erd_generator/
-  __main__.py          # primary python -m entrypoint (D2 default)
-  cli.py               # explicit input/output CLI, argument validation and orchestration
-  schema.py            # output-independent schema contract
-  sql_parser.py        # SQL adapters and per-run loading result
-  sql_statements.py    # PostgreSQL tokenization and statement boundaries
-  postgres_commands.py # ERD-neutral allowlist and bounded DO block extraction
-  postgres_do.py       # whole-block role/permission checks and constant SQL templates
-  diagnostics.py       # shared diagnostics (ParseFailure remains re-exported)
-  fk_config.py         # YAML relationship loading/resolution
-  validation.py        # FK integrity checks and normalized relationships
-  layout_config.py     # immutable business overrides and explicit YAML loading
-  d2.py                # pure group/region orchestration and D2 source generation
-  d2_emit.py           # SQL table, field, connection and container serialization
-  d2_references.py     # cross-group source-field labels and unambiguous target names
-  d2_business.py       # name families, override resolution and fallback communities
-  d2_layout.py         # size-aware table layers, components and column packing
-  d2_grouping.py       # relationship communities, compact layers and shared hubs
-  d2_styles.py         # native D2 palette, table and connection presets
-  d2_renderer.py       # pinned D2/ELK execution and SVG publication
-  d2_refinement.py     # bounded render comparison and winner publication
-  d2_geometry.py       # read-only SVG measurements and selection guards
-  artifacts.py         # atomic source-file publication
-  test_*.py            # unit tests close to implementation
-tests/
-  test_cli.py          # subprocess CLI and import-boundary tests
-  integration/        # real pinned D2 rendering; missing D2 is a failure
-  fixtures/           # PostgreSQL setup and relationship-community regressions
-generated/            # ignored generated source, SVG and local reports
-.github/workflows/    # build/test/lint and real ELK checks
+Each entry is `[local_column, target_table, target_column]`. For composite keys, use lists on both sides: `[[tenant_id, member_id], demo_library.members, [tenant_id, id]]`.
+
+Names and columns must exist; short table names must resolve unambiguously. Prefer qualified names when multiple schemas share table names. YAML adds relationships without replacing SQL declarations; duplicate relationships are deduplicated.
+
+For SQL `REFERENCES table` without target columns, only a single-column primary key can be inferred. Specify target columns explicitly for composite keys.
+
+## Business layout
+
+Grouping is automatic: table-name families and FK connectivity suggest regions, stable group identifiers select colours, and disconnected components are packed together. These are presentation heuristics; inferred groups may need correction and dense graphs can still have long or crossing lines.
+
+To override membership, titles or colours, pass `--layout-config ./erd-layout.yaml`:
+
+```yaml
+groups:
+  books:
+    tables: ["demo_library.books", "demo_library.book_*"]
+    label: Books
+    color: blue
+  loans:
+    tables: ["demo_library.loans"]
+    color: gold
 ```
 
-SQL dependencies flow from `sql_parser` to `postgres_do` to `postgres_commands`/`sql_statements`; the policy modules do not depend on Schema or rendering. The neutral-block check is pure and runs before any Schema mutation. D2 generation uses `validation`, `d2_business` and `d2_layout` over shared Schema and normalized relationships; the size-aware layout planner depends on the graph operations in `d2_grouping`, never the reverse. When requested, `d2_references` derives field annotations from the original group partition and validated FKs. Generation then serializes through `d2_emit`. These planners perform no I/O; CLI explicitly loads optional layout YAML before generation. The renderer depends only on shared presentation settings, not on the planners or Schema.
+Only `tables` is required. `label` defaults to the group key. Available colours: `blue`, `gold`, `green`, `violet`, `slate`, `rose`, `teal`, `orange`.
 
-For SVG output, CLI calls `d2_refinement`, which coordinates the builder, renderer and `d2_geometry` checks. These lower-level modules never import the coordinator or CLI. Source-only output calls the builder directly. Atomic text publication is shared through `artifacts`.
+Selectors match exact qualified table names first, then case-sensitive wildcards. Every selector must match; overlapping groups, duplicate keys and invalid configuration fail generation. Remaining tables are grouped automatically. `--grouping none` disables automatic grouping but retains explicit groups.
 
-The new explicit loading API is `erd_generator.sql_parser.load_schema_result(path)` returning this run's Schema and diagnostics. The old `load_schema_from_migrations()` / `get_last_parse_failures()` functions remain available for callers using the historical last-run cache. D2 source generation is available as `erd_generator.build_d2(schema, show_types=True, style="clean")` and never mutates its input; `style="classic"` preserves the original D2 output style.
+`--show-references` adds labels such as `FK → members.id` beside source fields for relationships between top-level groups. It retains the arrows and can widen tables; it is off by default.
 
-## Development and validation
+SVG generation may compare one additional ELK layout and select a more compact result after geometry and relationship checks. Successful output includes its matching D2 source. Source-only generation writes the initial layout. Algorithm details live in the [layout modules](#code-map) and their tests.
+
+## SQL support and diagnostics
+
+Inputs must be UTF-8. `V<number>__description.sql` migrations are ordered by numeric version; other SQL files follow in path order. The diagram describes the supplied migrations, not a live database or migration execution history.
+
+| SQL input | Behavior |
+| --- | --- |
+| `CREATE TABLE`, common `ALTER TABLE`, `DROP TABLE` and column/constraint changes | Update the schema. |
+| `CREATE INDEX`, `DROP INDEX`, `ALTER INDEX ... RENAME` | Update index metadata, including expression/partial index notes. |
+| `GRANT`, `REVOKE`, `ALTER DEFAULT PRIVILEGES`, `CREATE ROLE/USER`, standalone `CREATE SCHEMA` | Ignore supported setup commands that do not change ERD objects. |
+| Function/procedure definitions with string or dollar-quoted bodies | Ignore the definition; never execute the body. |
+| Straight-line `DO` blocks | Apply supported static table/index DDL; dollar-quoted bodies stay intact. |
+| Known role/permission `DO` blocks using `IF` or constant `EXECUTE format(...)` | Ignore only after every branch and command is checked as ERD-neutral. |
+| Conditional/dynamic structural DDL, loops, calls or unsupported procedural constructs | Report a diagnostic and stop generation. |
+
+The tool does not execute SQL. Unsupported procedural migrations need ordinary DDL or a reviewed schema snapshot as input. See the [role setup fixture](tests/fixtures/postgres_role_setup.sql) for an accepted block and [the block checker](erd_generator/postgres_do.py) for exact rules.
+
+Views, enums, partitioning, `search_path` and some other PostgreSQL features are not fully modeled. Zero diagnostics does not guarantee complete PostgreSQL interpretation. Self-referencing arrows may attach to table boundaries in D2/ELK; their field names remain explicit in labels.
+
+Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Full relationship and index details appear in tooltips; `--force-appendix` makes those notes visible in the SVG.
+
+| Problem | What to check |
+| --- | --- |
+| SQL/configuration error | Read the reported file/object and `parse_log/` diagnostics; fix the input before regenerating. Existing outputs are preserved. |
+| D2 missing or wrong version | Install exactly 0.7.1, check `d2 --version`, or set `--d2-binary`. |
+| Rendering failure | The new D2 source is retained and the previous SVG is unchanged. Fix the error and rerun. |
+| Timeout | Inspect diagram size and increase `--render-timeout` if needed. |
+
+Exit codes: **0** success, **1** generation/rendering failure, **2** invalid options. Source and SVG replacement are separate operations, so automation must check the exit code. Processing runs locally; no SQL or diagram is uploaded.
+
+## Additional CLI options
+
+Common display options are in the README; `--help` lists all options.
+
+| Option | Purpose |
+| --- | --- |
+| `--d2-binary PATH` | Rendering executable; defaults to `d2`. |
+| `--render-timeout SECONDS` | Positive timeout per D2 process; default 120. Layout comparison may use two processes. |
+| `--force-appendix` | Include table tooltip notes in the SVG appendix. |
+| `--log-dir PATH` | Write diagnostics to `PATH/parse_log/`; defaults to the working directory. |
+
+The first three options require SVG rendering.
+
+## Development
+
+After activating the README's Python environment:
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -447,14 +143,21 @@ python -m ruff format --check .
 python -m pytest -q -m integration
 ```
 
-The `not integration` marker runs fast tests without requiring D2. The `integration` marker requires exactly D2 0.7.1 and bundled ELK; missing dependencies fail rather than skip rendering validation. `python -m ruff format .` formats new/rewritten modules while preserving formatting of untouched legacy files.
+Fast tests do not require D2. Integration tests require exactly D2 0.7.1 with ELK and fail if it is unavailable. Unit tests live beside their modules; CLI and rendering tests live under `tests/`. Use synthetic fixtures only; keep company SQL, local research and generated diagrams out of Git.
 
-CI installs the fixed D2 release with an SHA-256 check and runs build, tests, lint and real rendering, including CLI checks using temporary SQL and YAML inputs. No bundled demonstration database or default generation step is required.
+### Code map
 
-## Supported SQL and limitations
+```text
+SQL + optional FK YAML → Schema → D2 source → D2 / ELK → SVG
+```
 
-The parser supports a practical PostgreSQL DDL subset: CREATE TABLE, common ALTER column/constraint/rename operations, DROP TABLE/COLUMN/CONSTRAINT/INDEX, CREATE INDEX (including expression/partial metadata) and ALTER INDEX RENAME. The pinned sqlglot DROP representation is handled explicitly, so removed objects no longer remain in the diagram.
+| Responsibility | Modules |
+| --- | --- |
+| CLI and orchestration | [cli.py](erd_generator/cli.py) |
+| SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `sql_statements.py`, `postgres_commands.py`, `postgres_do.py`, `diagnostics.py` |
+| Schema and configuration | [schema.py](erd_generator/schema.py), `validation.py`, `fk_config.py`, `layout_config.py` |
+| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_references.py`, `d2_styles.py` |
+| Rendering and layout comparison | [d2_renderer.py](erd_generator/d2_renderer.py), `d2_refinement.py`, `d2_geometry.py` |
+| Atomic source publication | [artifacts.py](erd_generator/artifacts.py) |
 
-CHECK/default changes, partitioning, views, enums, routine execution, search_path resolution and all exotic DDL are not fully modeled. Routine definitions and supported setup statements are ignored as described above; unsupported procedural execution and schema mutations yield diagnostics. Some other constructs are still ignored by the existing parser, so zero diagnostics do not prove complete PostgreSQL interpretation. Quoted identifier normalization and index-expression rewrites retain existing parser limitations.
-
-ELK uses hierarchical layout within inferred or configured regions, and independent regions are packed as described above. Automatic grouping combines naming evidence and FK connectivity; it is not a guaranteed business-domain partition. Dense/large diagrams may still contain crossings, extra bends or become wide; there is no fixed-coordinate placement. SVG is intended for browser viewing. PNG/PDF and their browser dependencies are outside the first release.
+CLI loads inputs and coordinates generation. Planners operate on Schema without I/O or mutation; the renderer does not depend on Schema or planners. `d2_refinement` coordinates rendering candidates and geometry checks. Lower-level modules must not import the coordinator or CLI.
