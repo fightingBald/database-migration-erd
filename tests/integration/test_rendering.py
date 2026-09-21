@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from erd_generator.d2 import build_d2
-from erd_generator.d2_renderer import D2RenderConfig, D2_VERSION, render_d2
+from erd_generator.d2_renderer import D2_VERSION, D2RenderConfig, render_d2
 from erd_generator.schema import Column, ForeignKey, Table
 from erd_generator.sql_parser import parse_schema_from_sql
 

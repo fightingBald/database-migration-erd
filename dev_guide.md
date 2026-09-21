@@ -177,7 +177,11 @@ python -m ruff format --check .
 python -m pytest -q -m integration
 ```
 
+CI runs these checks on Python 3.11 and 3.14. Ruff checks imports, modern Python syntax, unused variables, common bugs and redundant constructs; formatting covers every Python file. Use `python -m ruff check . --fix` for safe fixes, then review the diff.
+
 Fast tests do not require D2. Integration tests require exactly D2 0.7.1 with ELK and fail if it is unavailable. Optional TALA tests skip when `d2plugin-tala` is absent; once installed, run them with `python -m pytest -q -m tala`. A present but broken plugin fails those tests. Unit tests live beside their modules; CLI and rendering tests live under `tests/`. Use synthetic fixtures only; keep company SQL, local research and generated diagrams out of Git.
+
+Cleanup removed the unused `Index.uses_expression()`, `iter_columns()` and `iter_foreign_keys()` helpers. Python integrations can read `Index.expression_columns`, `Table.columns` and `Table.foreign_keys` directly; reverting the cleanup commit restores the helpers.
 
 ### Code map
 

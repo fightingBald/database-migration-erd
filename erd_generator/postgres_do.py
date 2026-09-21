@@ -12,9 +12,12 @@ _FORMAT_SLOT = re.compile(r"%(?:([1-9][0-9]*)\$)?([IL])|%%")
 
 
 def _unqualify_catalog(tokens: list[Token]) -> list[Token]:
-    if len(tokens) >= 3 and is_word(tokens[0], "PG_CATALOG"):
-        if tokens[1].token_type == TokenType.DOT:
-            return tokens[2:]
+    if (
+        len(tokens) >= 3
+        and is_word(tokens[0], "PG_CATALOG")
+        and tokens[1].token_type == TokenType.DOT
+    ):
+        return tokens[2:]
     return tokens
 
 
@@ -76,8 +79,7 @@ def _safe_condition(tokens: list[Token]) -> bool:
         and (
             from_index == 1
             or query[1].token_type == TokenType.STAR
-            or query[1].token_type == TokenType.NUMBER
-            and query[1].text == "1"
+            or (query[1].token_type == TokenType.NUMBER and query[1].text == "1")
             or is_word(query[1], column)
         )
         and is_word(tail[1], "WHERE")
@@ -225,8 +227,10 @@ def _neutral_body(tokens: list[Token], sql: str) -> bool:
             if not (
                 neutral_command(command)
                 or harmless_do_statement(command)
-                or is_word(token, "EXECUTE")
-                and _neutral_execute(sql[token.end + 1 : tokens[end].start])
+                or (
+                    is_word(token, "EXECUTE")
+                    and _neutral_execute(sql[token.end + 1 : tokens[end].start])
+                )
             ):
                 return False
             cursor = end + 1

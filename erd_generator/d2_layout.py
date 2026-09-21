@@ -1,15 +1,15 @@
 """Pure component grouping and estimated packing; D2/ELK places the actual shapes."""
 
-from collections import deque
-from dataclasses import dataclass
 import heapq
 import math
 import unicodedata
+from collections import deque
+from dataclasses import dataclass
 
-from .schema import Schema, Table
 from .d2_grouping import centered_ranks, layout_ranks
 from .d2_indexes import FOOTER_FONT_SIZE, index_footer
 from .d2_styles import COMPONENT_PADDING, GRID_GAP
+from .schema import Schema, Table
 from .validation import Relationship
 
 TARGET_ASPECT = 1.4
@@ -60,7 +60,9 @@ def connected_components(
     edges: list[list[Relationship]] = [[] for _ in groups]
     for fk in sorted(relationships):
         edges[group_for_table[fk.table]].append(fk)
-    return tuple(Component(names, tuple(fks)) for names, fks in zip(groups, edges))
+    return tuple(
+        Component(names, tuple(fks)) for names, fks in zip(groups, edges, strict=True)
+    )
 
 
 def _text_width(text: str) -> int:

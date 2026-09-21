@@ -1,7 +1,5 @@
 """Pure D2 table, field, connection and container serialization."""
 
-from .d2_styles import CLEAN_CONNECTION, CLEAN_TABLE, GroupPalette
-from .d2_references import FieldReferences
 from .d2_indexes import (
     FOOTER_FONT_SIZE,
     TABLE_BODY_KEY,
@@ -9,6 +7,8 @@ from .d2_indexes import (
     index_footer,
     sorted_indexes,
 )
+from .d2_references import FieldReferences
+from .d2_styles import CLEAN_CONNECTION, CLEAN_TABLE, GroupPalette
 from .schema import Schema, Table
 from .validation import Relationship, primary_columns
 
@@ -203,7 +203,9 @@ def relationship_lines(
     lines = []
     for fk in relationships:
         count = len(fk.columns)
-        for number, (local, remote) in enumerate(zip(fk.columns, fk.ref_columns), 1):
+        for number, (local, remote) in enumerate(
+            zip(fk.columns, fk.ref_columns, strict=True), 1
+        ):
             origin = paths[fk.table] if paths is not None else quote_d2(fk.table)
             target = (
                 paths[fk.ref_table] if paths is not None else quote_d2(fk.ref_table)

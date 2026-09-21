@@ -1,10 +1,10 @@
 """Exercise the optional TALA plugin through native D2 SVG rendering."""
 
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 
@@ -81,7 +81,9 @@ def test_forty_tables_in_six_unequal_automatic_groups(tmp_path, connected):
         "events",
     )
     for prefix, count in zip(
-        ("books", "loans", "members", "events", "fees", "rooms"), (9, 8, 7, 6, 5, 5)
+        ("books", "loans", "members", "events", "fees", "rooms"),
+        (9, 8, 7, 6, 5, 5),
+        strict=True,
     ):
         parent = f"{prefix}_records"
         roots.append(parent)

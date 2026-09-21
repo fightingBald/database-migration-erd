@@ -1,11 +1,11 @@
 """Read native D2 SVG geometry; never change coordinates or diagram content."""
 
-from dataclasses import dataclass
-from itertools import combinations
 import math
-from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from itertools import combinations, pairwise
+from pathlib import Path
 
 from .d2_affinity import group_weights, weighted_distance
 from .d2_business import plan_groups
@@ -140,7 +140,7 @@ def _routes(root: ET.Element) -> list[list[tuple[float, float]]]:
             raise ValueError("unsupported route geometry")
         if bool(path.get("marker-start")) == bool(path.get("marker-end")):
             raise ValueError("arrow direction")
-        points = list(zip(numbers[::2], numbers[1::2]))
+        points = list(zip(numbers[::2], numbers[1::2], strict=True))
         routes.append(points[::-1] if path.get("marker-start") else points)
     return routes
 
@@ -148,7 +148,7 @@ def _routes(root: ET.Element) -> list[list[tuple[float, float]]]:
 def _crossings(routes: list[list[tuple[float, float]]]) -> int:
     horizontal, vertical = [], []
     for i, route in enumerate(routes):
-        for a, b in zip(route, route[1:]):
+        for a, b in pairwise(route):
             if abs(a[1] - b[1]) < 1e-4 and abs(a[0] - b[0]) > 1:
                 horizontal.append((i, min(a[0], b[0]), max(a[0], b[0]), a[1]))
             elif abs(a[0] - b[0]) < 1e-4 and abs(a[1] - b[1]) > 1:
@@ -351,7 +351,7 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
 
     remaining = list(routes)
     for fk in validation.relationships:
-        for local, remote in zip(fk.columns, fk.ref_columns):
+        for local, remote in zip(fk.columns, fk.ref_columns, strict=True):
             # Pinned ELK self loops use table boundaries; retain that limitation.
             match = next(
                 (
@@ -371,7 +371,7 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
                 raise ValueError("field endpoints")
             remaining.pop(match)
     lengths = [
-        sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in zip(route, route[1:]))
+        sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in pairwise(route))
         for route in routes
     ]
     return LayoutMetrics(

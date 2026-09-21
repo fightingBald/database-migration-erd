@@ -52,7 +52,7 @@ def test_missing_or_invalid_utf8_configuration_has_context(tmp_path):
     for payload in (None, b"\xff"):
         if payload is not None:
             path.write_bytes(payload)
-        with pytest.raises(ValueError, match="Layout config.*layout.yaml"):
+        with pytest.raises(ValueError, match=r"Layout config.*layout\.yaml"):
             load_layout_config(path)
 
 

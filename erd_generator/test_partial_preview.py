@@ -1,7 +1,7 @@
 from copy import deepcopy
 
-from erd_generator.schema import Column, ForeignKey, Table
 from erd_generator import sql_parser, validation
+from erd_generator.schema import Column, ForeignKey, Table
 
 
 def test_preview_omits_invalid_tables_and_relationships_without_changing_input():

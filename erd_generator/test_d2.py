@@ -1,13 +1,13 @@
+import re
 from copy import deepcopy
 from pathlib import Path
-import re
 
 import pytest
 
 from erd_generator.d2 import build_d2, quote_d2
+from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Index, Table
 from erd_generator.sql_parser import parse_schema_from_sql
-from erd_generator.layout_config import GroupRule, LayoutConfig
 
 
 def sample_schema():

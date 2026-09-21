@@ -1,7 +1,7 @@
 """Exercise native cluster candidates, including nested packed component paths."""
 
-from copy import deepcopy
 import shutil
+from copy import deepcopy
 
 import pytest
 

@@ -1,18 +1,20 @@
 """SQL parsing helpers backed by sqlglot."""
+
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
 
 from .diagnostics import ParseFailure
+from .migrations import up_migration_sql
 from .postgres_commands import (
     DO_STATEMENT_ERROR,
     UnsupportedDoError,
@@ -23,7 +25,6 @@ from .postgres_commands import (
 )
 from .postgres_do import neutral_do_body
 from .postgres_exclusions import SQLParseContext
-from .migrations import up_migration_sql
 from .schema import (
     Column,
     ForeignKey,
@@ -36,9 +37,11 @@ from .schema import (
 )
 from .sql_statements import (
     SQLLexError,
-    split_sql_statements as _split_sql_statements,
     starts_with,
     tokenize_sql,
+)
+from .sql_statements import (
+    split_sql_statements as _split_sql_statements,
 )
 
 RENAME_CONSTRAINT_RE = re.compile(
@@ -108,7 +111,7 @@ def _column_name(node: exp.Expression | str | None) -> str:
     return _identifier_name(node)
 
 
-def _expression_sql(node: Optional[exp.Expression]) -> str:
+def _expression_sql(node: exp.Expression | None) -> str:
     if node is None:
         return ""
     return node.sql(dialect="postgres")
@@ -118,7 +121,7 @@ def _expression_sql(node: Optional[exp.Expression]) -> str:
 # Failure tracking
 
 
-_LAST_PARSE_FAILURES: List[ParseFailure] = []
+_LAST_PARSE_FAILURES: list[ParseFailure] = []
 
 
 def _clean_sql_snippet(sql_text: str, limit: int = 200) -> str:
@@ -129,17 +132,19 @@ def _clean_sql_snippet(sql_text: str, limit: int = 200) -> str:
 
 
 def _record_failure(
-    failures: Optional[List[ParseFailure]],
-    source: Optional[str],
+    failures: list[ParseFailure] | None,
+    source: str | None,
     sql_text: str,
     reason: str,
     *,
-    line: Optional[int] = None,
+    line: int | None = None,
 ) -> None:
     snippet = _clean_sql_snippet(sql_text)
     location = source or "<input>"
     if failures is not None:
-        failures.append(ParseFailure(source=source, sql=snippet, reason=reason, line=line))
+        failures.append(
+            ParseFailure(source=source, sql=snippet, reason=reason, line=line)
+        )
     else:
         logging.getLogger(__name__).warning("SQL parse: %s: %s", location, reason)
 
@@ -148,7 +153,7 @@ def _record_failure(
 # Index formatting helpers
 
 
-def _format_index_expression(expression: exp.Expression) -> Tuple[str, Optional[str]]:
+def _format_index_expression(expression: exp.Expression) -> tuple[str, str | None]:
     if isinstance(expression, exp.Column):
         column = _column_name(expression.this)
         return column.upper(), column
@@ -159,7 +164,7 @@ def _format_index_expression(expression: exp.Expression) -> Tuple[str, Optional[
     return display, None
 
 
-def _format_ordered_expression(ordered: exp.Expression) -> Tuple[str, Optional[str]]:
+def _format_ordered_expression(ordered: exp.Expression) -> tuple[str, str | None]:
     if isinstance(ordered, exp.Ordered):
         display, normalized = _format_index_expression(ordered.this)
         if ordered.args.get("desc"):
@@ -174,44 +179,51 @@ def _format_ordered_expression(ordered: exp.Expression) -> Tuple[str, Optional[s
 # Constraint ingestion
 
 
-def _apply_primary_key(table: Table, pk_expr: exp.PrimaryKey, constraint_name: Optional[str]) -> None:
-    columns: List[str] = []
+def _apply_primary_key(
+    table: Table, pk_expr: exp.PrimaryKey, constraint_name: str | None
+) -> None:
+    columns: list[str] = []
     for item in pk_expr.expressions or []:
-        if isinstance(item, exp.Ordered):
-            target = item.this
-        else:
-            target = item
+        target = item.this if isinstance(item, exp.Ordered) else item
         columns.append(_column_name(target))
     table.set_primary_key(columns, constraint_name)
 
 
-def _apply_foreign_key(table: Table, fk_expr: exp.ForeignKey, constraint_name: Optional[str]) -> None:
+def _apply_foreign_key(
+    table: Table, fk_expr: exp.ForeignKey, constraint_name: str | None
+) -> None:
     local_columns = tuple(_column_name(col) for col in fk_expr.expressions or [])
     ref_table = ""
-    ref_columns: Tuple[str, ...] = ()
+    ref_columns: tuple[str, ...] = ()
     reference = fk_expr.args.get("reference")
     if isinstance(reference, exp.Reference):
         schema_expr = reference.this
         if isinstance(schema_expr, exp.Schema):
             ref_table = _table_name(schema_expr.this)
-            ref_columns = tuple(_column_name(col) for col in schema_expr.expressions or [])
+            ref_columns = tuple(
+                _column_name(col) for col in schema_expr.expressions or []
+            )
         else:
             ref_table = _table_name(schema_expr)
-            ref_columns = tuple(_column_name(col) for col in reference.expressions or [])
+            ref_columns = tuple(
+                _column_name(col) for col in reference.expressions or []
+            )
     table.add_foreign_key(
         ForeignKey(columns=local_columns, ref_table=ref_table, ref_columns=ref_columns),
         constraint_name=constraint_name,
     )
 
 
-def _apply_unique_constraint(table: Table, unique_expr: exp.UniqueColumnConstraint, constraint_name: Optional[str]) -> None:
+def _apply_unique_constraint(
+    table: Table, unique_expr: exp.UniqueColumnConstraint, constraint_name: str | None
+) -> None:
     if isinstance(unique_expr.this, exp.Schema):
         column_expressions = unique_expr.this.expressions or []
     else:
         column_expressions = unique_expr.expressions or []
-    displays: List[str] = []
-    column_names: List[Optional[str]] = []
-    expression_columns: List[str] = []
+    displays: list[str] = []
+    column_names: list[str | None] = []
+    expression_columns: list[str] = []
     for item in column_expressions or []:
         display, normalized = _format_index_expression(item)
         displays.append(display)
@@ -242,8 +254,10 @@ def _apply_constraint(table: Table, constraint: exp.Constraint) -> None:
             _apply_unique_constraint(table, item, constraint_name)
 
 
-def _apply_column_constraints(table: Table, column: Column, constraints: Sequence[exp.ColumnConstraint]) -> None:
-    pk_constraint_name: Optional[str] = None
+def _apply_column_constraints(
+    table: Table, column: Column, constraints: Sequence[exp.ColumnConstraint]
+) -> None:
+    pk_constraint_name: str | None = None
     for constraint in constraints:
         constraint_name = _identifier_name(constraint.this)
         kind = constraint.args.get("kind")
@@ -268,11 +282,13 @@ def _apply_column_constraints(table: Table, column: Column, constraints: Sequenc
             )
         elif isinstance(kind, exp.Reference):
             schema_expr = kind.this
-            ref_columns: Tuple[str, ...] = ()
+            ref_columns: tuple[str, ...] = ()
             ref_table = ""
             if isinstance(schema_expr, exp.Schema):
                 ref_table = _table_name(schema_expr.this)
-                ref_columns = tuple(_column_name(col) for col in schema_expr.expressions or [])
+                ref_columns = tuple(
+                    _column_name(col) for col in schema_expr.expressions or []
+                )
             elif schema_expr is not None:
                 ref_table = _table_name(schema_expr)
             table.add_foreign_key(
@@ -315,8 +331,8 @@ def _ingest_table_element(table: Table, element: exp.Expression) -> None:
 # Statement handlers
 
 
-def _extract_fk_hints(raw_sql: str) -> List[Tuple[str, str, Tuple[str, ...]]]:
-    hints: List[Tuple[str, str, Tuple[str, ...]]] = []
+def _extract_fk_hints(raw_sql: str) -> list[tuple[str, str, tuple[str, ...]]]:
+    hints: list[tuple[str, str, tuple[str, ...]]] = []
     fk_pattern = re.compile(
         r"--\s*FK\s+(?P<table>[^(]+?)\s*\((?P<cols>[^)]*)\)",
         re.IGNORECASE,
@@ -334,31 +350,39 @@ def _extract_fk_hints(raw_sql: str) -> List[Tuple[str, str, Tuple[str, ...]]]:
         local_column = _column_name(column_match.group("name"))
         ref_table = _table_name(match.group("table"))
         ref_columns_raw = match.group("cols")
-        ref_columns: Tuple[str, ...] = tuple(
+        ref_columns: tuple[str, ...] = tuple(
             _column_name(part) for part in ref_columns_raw.split(",") if part.strip()
         )
         hints.append((local_column, ref_table, ref_columns))
     return hints
 
 
-def _apply_fk_hints(table: Table, hints: Iterable[Tuple[str, str, Tuple[str, ...]]]) -> None:
+def _apply_fk_hints(
+    table: Table, hints: Iterable[tuple[str, str, tuple[str, ...]]]
+) -> None:
     for local_column, ref_table, ref_columns in hints:
         if not local_column or not ref_table:
             continue
         local_columns = (local_column,)
         target_columns = ref_columns or local_columns
         exists = any(
-            fk.columns == local_columns and fk.ref_table == ref_table and fk.ref_columns == target_columns
+            fk.columns == local_columns
+            and fk.ref_table == ref_table
+            and fk.ref_columns == target_columns
             for fk in table.foreign_keys
         )
         if exists:
             continue
         table.add_foreign_key(
-            ForeignKey(columns=local_columns, ref_table=ref_table, ref_columns=target_columns)
+            ForeignKey(
+                columns=local_columns, ref_table=ref_table, ref_columns=target_columns
+            )
         )
 
 
-def _handle_create_table(statement: exp.Create, schema: Schema, raw_sql: Optional[str] = None) -> None:
+def _handle_create_table(
+    statement: exp.Create, schema: Schema, raw_sql: str | None = None
+) -> None:
     schema_expr = statement.this
     if not isinstance(schema_expr, exp.Schema):
         return
@@ -384,8 +408,8 @@ def _handle_create_index(
     statement: exp.Create,
     schema: Schema,
     *,
-    source: Optional[str] = None,
-    failures: Optional[List[ParseFailure]] = None,
+    source: str | None = None,
+    failures: list[ParseFailure] | None = None,
 ) -> None:
     index_expr = statement.this
     if not isinstance(index_expr, exp.Index):
@@ -405,10 +429,12 @@ def _handle_create_index(
         return
 
     params = index_expr.args.get("params")
-    column_items = params.args.get("columns") if isinstance(params, exp.IndexParameters) else None
-    columns: List[str] = []
-    column_names: List[Optional[str]] = []
-    expression_columns: List[str] = []
+    column_items = (
+        params.args.get("columns") if isinstance(params, exp.IndexParameters) else None
+    )
+    columns: list[str] = []
+    column_names: list[str | None] = []
+    expression_columns: list[str] = []
     if column_items:
         for item in column_items:
             display, normalized = _format_ordered_expression(item)
@@ -442,10 +468,10 @@ def _handle_create_index(
 def _handle_create(
     statement: exp.Create,
     schema: Schema,
-    raw_sql: Optional[str] = None,
+    raw_sql: str | None = None,
     *,
-    source: Optional[str] = None,
-    failures: Optional[List[ParseFailure]] = None,
+    source: str | None = None,
+    failures: list[ParseFailure] | None = None,
 ) -> None:
     kind = (statement.args.get("kind") or "").upper()
     has_expression = statement.args.get("expression") is not None
@@ -471,7 +497,9 @@ def _handle_drop_table(table_name: str, schema: Schema) -> None:
         removed = [fk for fk in table.foreign_keys if fk.ref_table == table_name]
         if not removed:
             continue
-        table.foreign_keys = [fk for fk in table.foreign_keys if fk.ref_table != table_name]
+        table.foreign_keys = [
+            fk for fk in table.foreign_keys if fk.ref_table != table_name
+        ]
         for fk in removed:
             if fk.name:
                 table.constraint_types.pop(fk.name.lower(), None)
@@ -479,10 +507,12 @@ def _handle_drop_table(table_name: str, schema: Schema) -> None:
 
 def _drop_targets(statement: exp.Drop) -> Sequence[exp.Expression]:
     """sqlglot 30 stores DROP targets in tables, including columns/constraints."""
-    return statement.args.get("tables") or ([statement.this] if statement.this is not None else [])
+    return statement.args.get("tables") or (
+        [statement.this] if statement.this is not None else []
+    )
 
 
-def _index_name_for_table(identifier: str, table: Table) -> Optional[str]:
+def _index_name_for_table(identifier: str, table: Table) -> str | None:
     if "." not in identifier:
         return identifier
     namespace, name = identifier.rsplit(".", 1)
@@ -514,7 +544,9 @@ def _handle_alter_table(statement: exp.Alter, schema: Schema) -> None:
         elif isinstance(action, exp.AlterColumn):
             column_name = _column_name(action.this)
             if action.args.get("dtype"):
-                current_table.update_data_type(column_name, _expression_sql(action.args["dtype"]))
+                current_table.update_data_type(
+                    column_name, _expression_sql(action.args["dtype"])
+                )
             if "allow_null" in action.args:
                 allow_null = action.args["allow_null"]
                 current_table.update_nullable(column_name, bool(allow_null))
@@ -532,8 +564,12 @@ def _handle_alter_table(statement: exp.Alter, schema: Schema) -> None:
             kind = (action.args.get("kind") or "").upper()
             for target in _drop_targets(action):
                 if kind == "COLUMN":
-                    drop_column_in_schema(schema, current_table_name, _column_name(target),
-                                          cascade=bool(action.args.get("cascade")))
+                    drop_column_in_schema(
+                        schema,
+                        current_table_name,
+                        _column_name(target),
+                        cascade=bool(action.args.get("cascade")),
+                    )
                 elif kind == "CONSTRAINT":
                     constraint_name = _table_name(target)
                     if constraint_name:
@@ -546,7 +582,11 @@ def _handle_alter_table(statement: exp.Alter, schema: Schema) -> None:
                 current_table = schema[current_table_name]
         elif isinstance(action, exp.AlterRename):
             new_table_name = _table_name(action.this)
-            if new_table_name and "." not in new_table_name and "." in current_table_name:
+            if (
+                new_table_name
+                and "." not in new_table_name
+                and "." in current_table_name
+            ):
                 prefix = current_table_name.rsplit(".", 1)[0]
                 new_table_name = f"{prefix}.{new_table_name}"
             if new_table_name and new_table_name != current_table_name:
@@ -601,22 +641,26 @@ def _apply_statement(
     statement: exp.Expression | None,
     schema: Schema,
     raw_statement: str,
-    source: Optional[str],
-    failures: List[ParseFailure],
+    source: str | None,
+    failures: list[ParseFailure],
     in_do: bool,
-) -> Optional[str]:
+) -> str | None:
     """Apply one parsed expression to the caller's staged schema."""
     definition = routine_definition(statement)
     if definition:
         return definition
     if isinstance(statement, exp.Create):
-        _handle_create(statement, schema, raw_statement, source=source, failures=failures)
+        _handle_create(
+            statement, schema, raw_statement, source=source, failures=failures
+        )
     elif isinstance(statement, exp.Alter):
         kind = (statement.args.get("kind") or "").upper()
         if kind in {"TABLE", "INDEX"}:
             _handle_alter(statement, schema)
         else:
-            _record_failure(failures, source, raw_statement, f"Unsupported ALTER {kind}")
+            _record_failure(
+                failures, source, raw_statement, f"Unsupported ALTER {kind}"
+            )
     elif isinstance(statement, exp.Drop):
         kind = (statement.args.get("kind") or "").upper()
         if kind in {"TABLE", "INDEX"}:
@@ -636,8 +680,8 @@ def _parse_sql(
     schema: Schema,
     *,
     context: SQLParseContext,
-    source: Optional[str] = None,
-    failures: Optional[List[ParseFailure]] = None,
+    source: str | None = None,
+    failures: list[ParseFailure] | None = None,
     line_offset: int = 0,
     in_do: bool = False,
 ) -> None:
@@ -656,16 +700,23 @@ def _parse_sql(
         tokens = tokenize_sql(raw_statement)
         if not tokens:
             continue
-        skipped = neutral_command(tokens) or context.skip_statement(tokens, tables=schema.keys(), in_do=in_do)
-        if skipped or in_do and harmless_do_statement(tokens):
+        skipped = neutral_command(tokens) or context.skip_statement(
+            tokens, tables=schema.keys(), in_do=in_do
+        )
+        if skipped or (in_do and harmless_do_statement(tokens)):
             context.skipped[skipped or "DO no-op"] += 1
             logging.getLogger(__name__).debug(
-                "SQL skipped for ERD: %s at %s:%s", skipped or "DO no-op", source or "<input>", start_line
+                "SQL skipped for ERD: %s at %s:%s",
+                skipped or "DO no-op",
+                source or "<input>",
+                start_line,
             )
             continue
         if starts_with(tokens, "DO"):
             if in_do:
-                _record_failure(failures, source, raw_statement, DO_STATEMENT_ERROR, line=start_line)
+                _record_failure(
+                    failures, source, raw_statement, DO_STATEMENT_ERROR, line=start_line
+                )
                 return
             try:
                 body = extract_do_body(raw_statement, tokens)
@@ -675,17 +726,28 @@ def _parse_sql(
             if neutral_do_body(body.sql):
                 context.skipped["neutral DO block"] += 1
                 logging.getLogger(__name__).debug(
-                    "SQL skipped for ERD: neutral DO block at %s:%s", source or "<input>", start_line
+                    "SQL skipped for ERD: neutral DO block at %s:%s",
+                    source or "<input>",
+                    start_line,
                 )
                 continue
             staged = deepcopy(schema)
             staged_context = deepcopy(context)
-            block_failures: List[ParseFailure] = []
-            _parse_sql(body.sql, staged, context=staged_context, source=source, failures=block_failures,
-                       line_offset=start_line - 1 + body.line_offset, in_do=True)
+            block_failures: list[ParseFailure] = []
+            _parse_sql(
+                body.sql,
+                staged,
+                context=staged_context,
+                source=source,
+                failures=block_failures,
+                line_offset=start_line - 1 + body.line_offset,
+                in_do=True,
+            )
             if block_failures:
                 for failure in block_failures:
-                    _record_failure(failures, source, failure.sql, failure.reason, line=failure.line)
+                    _record_failure(
+                        failures, source, failure.sql, failure.reason, line=failure.line
+                    )
             else:
                 schema.clear()
                 schema.update(staged)
@@ -696,8 +758,12 @@ def _parse_sql(
                     "Static DO block applied at %s:%s", source or "<input>", start_line
                 )
             continue
-        if in_do and not any(starts_with(tokens, word) for word in ("CREATE", "ALTER", "DROP")):
-            _record_failure(failures, source, raw_statement, DO_STATEMENT_ERROR, line=start_line)
+        if in_do and not any(
+            starts_with(tokens, word) for word in ("CREATE", "ALTER", "DROP")
+        ):
+            _record_failure(
+                failures, source, raw_statement, DO_STATEMENT_ERROR, line=start_line
+            )
             return
         try:
             expressions = sqlglot.parse(raw_statement, read="postgres")
@@ -714,18 +780,27 @@ def _parse_sql(
             if in_do:
                 return
             continue
-        mutating = any(isinstance(s, (exp.Create, exp.Alter, exp.Drop, exp.Command)) for s in expressions)
+        mutating = any(
+            isinstance(s, (exp.Create, exp.Alter, exp.Drop, exp.Command))
+            for s in expressions
+        )
         staged = deepcopy(schema) if mutating else schema
-        statement_failures: List[ParseFailure] = []
+        statement_failures: list[ParseFailure] = []
         skipped_definitions = []
         for statement in expressions:
             try:
-                definition = _apply_statement(statement, staged, raw_statement, source, statement_failures, in_do)
+                definition = _apply_statement(
+                    statement, staged, raw_statement, source, statement_failures, in_do
+                )
             except ValueError:
                 # Application errors can contain SQL-derived payloads. Keep the
                 # location, roll back this statement, and continue the stream.
-                _record_failure(statement_failures, source, raw_statement,
-                                "Invalid schema change (ValueError); statement rolled back")
+                _record_failure(
+                    statement_failures,
+                    source,
+                    raw_statement,
+                    "Invalid schema change (ValueError); statement rolled back",
+                )
             else:
                 if definition:
                     skipped_definitions.append(definition)
@@ -733,7 +808,13 @@ def _parse_sql(
                 break
         if statement_failures:
             for failure in statement_failures:
-                _record_failure(failures, source, failure.sql, failure.reason, line=failure.line or start_line)
+                _record_failure(
+                    failures,
+                    source,
+                    failure.sql,
+                    failure.reason,
+                    line=failure.line or start_line,
+                )
             if in_do:
                 return
         else:
@@ -749,9 +830,9 @@ def parse_schema_from_sql(
     sql: str,
     schema: Schema,
     *,
-    source: Optional[str] = None,
-    failures: Optional[List[ParseFailure]] = None,
-    context: Optional[SQLParseContext] = None,
+    source: str | None = None,
+    failures: list[ParseFailure] | None = None,
+    context: SQLParseContext | None = None,
 ) -> None:
     """Apply forward SQL; reuse context for chunks from one migration stream."""
     context = context if context is not None else SQLParseContext()
@@ -768,14 +849,18 @@ def parse_schema_from_sql(
 @dataclass
 class SchemaLoadResult:
     schema: Schema
-    failures: List[ParseFailure]
+    failures: list[ParseFailure]
     skipped: dict[str, int] = field(default_factory=dict)
 
 
 def _migration_sort_key(path: Path) -> tuple:
     match = re.match(r"^V(\d+(?:[._]\d+)*)(?:__|$)", path.stem, re.IGNORECASE)
     if match:
-        return (0, tuple(int(part) for part in re.split(r"[._]", match.group(1))), str(path))
+        return (
+            0,
+            tuple(int(part) for part in re.split(r"[._]", match.group(1))),
+            str(path),
+        )
     return (1, (), str(path))
 
 
@@ -788,14 +873,19 @@ def load_schema_result(path: str) -> SchemaLoadResult:
     if not files:
         raise ValueError(f"migration directory contains no SQL files: {root}")
     schema: Schema = {}
-    failures: List[ParseFailure] = []
+    failures: list[ParseFailure] = []
     context = SQLParseContext()
     for file_path in files:
         if file_path.name.lower().endswith(".down.sql"):
             context.skipped["Down migration file"] += 1
             continue
-        parse_schema_from_sql(file_path.read_text(encoding="utf-8"), schema,
-                              source=str(file_path), failures=failures, context=context)
+        parse_schema_from_sql(
+            file_path.read_text(encoding="utf-8"),
+            schema,
+            source=str(file_path),
+            failures=failures,
+            context=context,
+        )
     return SchemaLoadResult(schema, failures, dict(context.skipped))
 
 
@@ -807,5 +897,5 @@ def load_schema_from_migrations(path: str) -> Schema:
     return result.schema
 
 
-def get_last_parse_failures() -> List[ParseFailure]:
+def get_last_parse_failures() -> list[ParseFailure]:
     return list(_LAST_PARSE_FAILURES)

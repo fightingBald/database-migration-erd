@@ -1,7 +1,7 @@
 """Bounded, deterministic cluster planning from real foreign-key constraints."""
 
 from collections import Counter
-from functools import lru_cache
+from functools import cache
 from itertools import permutations
 
 from .validation import Relationship
@@ -38,7 +38,7 @@ def affinity_ranks(
         positions = {rank: i for i, rank in enumerate(order)}
         return (
             sum(w * abs(positions[a] - positions[b]) for (a, b), w in edges.items()),
-            sum(a != b for a, b in zip(order, original)),
+            sum(a != b for a, b in zip(order, original, strict=True)),
             order,
         )
 
@@ -50,7 +50,7 @@ def affinity_ranks(
         # improvements avoid oscillation; ties preserve the existing layout.
         for _ in range(8):
             neighbors = [
-                best[:i] + (best[i + 1], best[i]) + best[i + 2 :]
+                (*best[:i], best[i + 1], best[i], *best[i + 2 :])
                 for i in range(len(best) - 1)
             ]
             candidate = min(neighbors, key=score)
@@ -59,7 +59,7 @@ def affinity_ranks(
             best = candidate
     if score(best)[0] >= score(original)[0]:
         return dict(ranks)
-    positions = dict(zip(best, original))
+    positions = dict(zip(best, original, strict=True))
     return {name: positions[rank] for name, rank in ranks.items()}
 
 
@@ -76,7 +76,7 @@ def cluster_pairs(weights: dict[tuple[str, str], int]) -> dict[str, str]:
     names = tuple(sorted(strength))
     if len(names) <= 12:
 
-        @lru_cache(maxsize=None)
+        @cache
         def match(mask):
             if not mask:
                 return 0, ()
@@ -113,7 +113,7 @@ def weighted_distance(
     """Mean Manhattan cluster-centre distance, weighted by FK constraints."""
     return (
         sum(
-            w * sum(abs(x - y) for x, y in zip(centres[a], centres[b]))
+            w * sum(abs(x - y) for x, y in zip(centres[a], centres[b], strict=True))
             for (a, b), w in weights.items()
         )
         / sum(weights.values())

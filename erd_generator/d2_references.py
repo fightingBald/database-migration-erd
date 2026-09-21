@@ -33,6 +33,6 @@ def field_references(
     for fk in relationships:
         if owners[fk.table] == owners[fk.ref_table]:
             continue
-        for column, remote in zip(fk.columns, fk.ref_columns):
+        for column, remote in zip(fk.columns, fk.ref_columns, strict=True):
             targets[fk.table, column].add(f"{names[fk.ref_table]}.{remote}")
     return {key: ", ".join(sorted(values)) for key, values in sorted(targets.items())}

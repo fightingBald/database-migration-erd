@@ -7,7 +7,6 @@ from erd_generator.d2_renderer import D2RenderError
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Table
 
-
 SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">
 <g><rect class="shape" x="20" y="20" width="100" height="108"/>
 <rect class="class_header" x="20" y="20" width="100" height="36"/>

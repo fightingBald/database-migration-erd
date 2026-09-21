@@ -1,7 +1,8 @@
 """Exercise business groups through pinned D2, including actual SVG field ports."""
 
-from copy import deepcopy
+import itertools
 import xml.etree.ElementTree as ET
+from copy import deepcopy
 
 import pytest
 
@@ -176,7 +177,7 @@ def test_shared_hub_does_not_force_forty_tables_into_one_long_strip(tmp_path, br
     root = render(schema, tmp_path)
     assert_compact(root, table_boxes(root))
     lengths = [
-        sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in zip(route, route[1:]))
+        sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in itertools.pairwise(route))
         for route in arrow_routes(root)
     ]
     assert max(lengths) < 4800

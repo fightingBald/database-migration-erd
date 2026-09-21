@@ -1,5 +1,6 @@
 """Compare compact routing with the previous ELK spacing across graph shapes."""
 
+import itertools
 import os
 import subprocess
 import xml.etree.ElementTree as ET
@@ -79,7 +80,10 @@ def test_spacing_reduces_routes_without_losing_fields(tmp_path, shape, direction
         assert_fk_arrows(schema, root)
         _, _, width, height = map(float, root.get("viewBox").split())
         lengths = [
-            sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in zip(route, route[1:]))
+            sum(
+                abs(a[0] - b[0]) + abs(a[1] - b[1])
+                for a, b in itertools.pairwise(route)
+            )
             for route in arrow_routes(root)
         ]
         measurements.append((width * height, sum(lengths), max(lengths, default=0)))

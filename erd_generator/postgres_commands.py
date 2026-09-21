@@ -41,11 +41,12 @@ def neutral_command(tokens: list[Token]) -> str | None:
     This is an impact allowlist, not a complete PostgreSQL syntax validator.
     In particular, CREATE SCHEMA must not contain any embedded object DDL.
     """
-    if any(starts_with(tokens, word) for word in ("GRANT", "REVOKE")):
-        if len(tokens) >= 4 and any(
-            is_word(t, "TO") or is_word(t, "FROM") for t in tokens[1:]
-        ):
-            return tokens[0].text.upper()
+    if (
+        any(starts_with(tokens, word) for word in ("GRANT", "REVOKE"))
+        and len(tokens) >= 4
+        and any(is_word(t, "TO") or is_word(t, "FROM") for t in tokens[1:])
+    ):
+        return tokens[0].text.upper()
     if starts_with(tokens, "ALTER", "DEFAULT", "PRIVILEGES") and any(
         is_word(t, "GRANT") or is_word(t, "REVOKE") for t in tokens[3:]
     ):
@@ -74,8 +75,7 @@ def routine_definition(statement: exp.Expression) -> str | None:
     body = statement.args.get("expression")
     if kind in {"FUNCTION", "PROCEDURE"} and (
         isinstance(body, exp.Heredoc)
-        or isinstance(body, exp.Literal)
-        and body.is_string
+        or (isinstance(body, exp.Literal) and body.is_string)
     ):
         return f"CREATE {kind} definition"
     return None

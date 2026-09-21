@@ -1,5 +1,6 @@
 """Cluster proximity must reflect real FK constraints, with bounded planning."""
 
+import itertools
 from collections import Counter
 
 import pytest
@@ -42,7 +43,7 @@ def test_pairing_optimizes_all_pairs_instead_of_greedily_taking_largest_edge():
 @pytest.mark.parametrize("count", [0, 1, 6, 12, 30])
 def test_pairing_is_deterministic_disjoint_and_uses_only_real_edges(count):
     names = [f"group_{i:02}" for i in range(count)]
-    weights = {(a, b): 1 + i % 5 for i, (a, b) in enumerate(zip(names, names[1:]))}
+    weights = {(a, b): 1 + i % 5 for i, (a, b) in enumerate(itertools.pairwise(names))}
     hints = cluster_pairs(weights)
     assert hints == cluster_pairs(dict(reversed(list(weights.items()))))
     counts = Counter(n for pair in hints.items() for n in pair)

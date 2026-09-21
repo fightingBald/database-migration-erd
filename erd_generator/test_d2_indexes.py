@@ -3,8 +3,8 @@ from copy import deepcopy
 import pytest
 
 from erd_generator.d2 import build_d2
+from erd_generator.d2_indexes import FOOTER_LINE_WIDTH, footer_markup, index_footer
 from erd_generator.d2_layout import Component, estimate_size
-from erd_generator.d2_indexes import FOOTER_LINE_WIDTH, index_footer, footer_markup
 from erd_generator.schema import Column, ForeignKey, Index, Table
 
 

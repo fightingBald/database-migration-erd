@@ -4,10 +4,10 @@ from collections.abc import Callable
 from hashlib import sha256
 
 from .d2_affinity import affinity_ranks, cluster_pairs, group_weights
+from .d2_business import BusinessGroup, plan_groups
 from .d2_emit import container_lines, diagram_lines, relationship_lines, table_path
 from .d2_emit import quote_d2 as quote_d2
 from .d2_engines import validate_layout_engine
-from .d2_business import BusinessGroup, plan_groups
 from .d2_grouping import centered_ranks, group_tables
 from .d2_layout import Component, estimate_size, plan_layout, table_ranks
 from .d2_references import FieldReferences, field_references
@@ -128,7 +128,11 @@ def _component_lines(
             group_palette(group.key, group.color) if group.label else inherited_palette
         )
 
-        def emit(part: Component) -> tuple[list[str], dict[str, str]]:
+        def emit(
+            part: Component,
+            group: BusinessGroup = group,
+            palette: GroupPalette | None = palette,
+        ) -> tuple[list[str], dict[str, str]]:
             if group.label:
                 # One business level plus one inferred community level. Child
                 # groups have no business label, so this recursion is bounded.

@@ -1,8 +1,8 @@
 """Compare bounded native layouts without sacrificing the existing winner."""
 
 import logging
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from .artifacts import write_text_atomic
 from .d2 import build_d2
