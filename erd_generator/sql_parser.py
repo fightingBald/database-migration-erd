@@ -23,6 +23,7 @@ from .postgres_commands import (
 )
 from .postgres_do import neutral_do_body
 from .postgres_exclusions import SQLParseContext
+from .migrations import up_migration_sql
 from .schema import (
     Column,
     ForeignKey,
@@ -752,9 +753,16 @@ def parse_schema_from_sql(
     failures: Optional[List[ParseFailure]] = None,
     context: Optional[SQLParseContext] = None,
 ) -> None:
-    """Apply SQL; reuse context when applying multiple chunks from one stream."""
-    _parse_sql(sql, schema, context=context if context is not None else SQLParseContext(),
-               source=source, failures=failures)
+    """Apply forward SQL; reuse context for chunks from one migration stream."""
+    context = context if context is not None else SQLParseContext()
+    try:
+        selected = up_migration_sql(sql)
+    except SQLLexError as exc:
+        _record_failure(failures, source, "", str(exc), line=exc.line)
+        return
+    if len(selected) < len(sql):
+        context.skipped["Down migration section"] += 1
+    _parse_sql(selected, schema, context=context, source=source, failures=failures)
 
 
 @dataclass
@@ -783,6 +791,9 @@ def load_schema_result(path: str) -> SchemaLoadResult:
     failures: List[ParseFailure] = []
     context = SQLParseContext()
     for file_path in files:
+        if file_path.name.lower().endswith(".down.sql"):
+            context.skipped["Down migration file"] += 1
+            continue
         parse_schema_from_sql(file_path.read_text(encoding="utf-8"), schema,
                               source=str(file_path), failures=failures, context=context)
     return SchemaLoadResult(schema, failures, dict(context.skipped))

@@ -214,10 +214,12 @@ def test_library_role_migration_renders_real_svg(tmp_path):
     migrations = tmp_path / "migrations"
     migrations.mkdir()
     (migrations / "V1.sql").write_text(
-        "CREATE SCHEMA demo_library;\n"
+        "-- +migrate Up\nCREATE SCHEMA demo_library;\n"
         "CREATE TABLE demo_library.members(id int PRIMARY KEY);\n"
         "CREATE TABLE demo_library.loans(id int, member_id int REFERENCES demo_library.members(id));\n"
-        + (ROOT / "tests/fixtures/postgres_role_setup.sql").read_text(),
+        + (ROOT / "tests/fixtures/postgres_role_setup.sql")
+        .read_text()
+        .removeprefix("-- +migrate Up\n"),
         encoding="utf-8",
     )
     output = tmp_path / "schema.svg"

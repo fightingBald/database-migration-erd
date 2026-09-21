@@ -94,6 +94,8 @@ SVG generation may compare one additional ELK layout and select a more compact r
 
 Inputs must be UTF-8. `V<number>__description.sql` migrations are ordered by numeric version; other SQL files follow in path order. The diagram describes the supplied migrations, not a live database or migration execution history.
 
+Plain SQL is read in full. For sql-migrate/goose files, only the Up section is read; direction markers are case-insensitive, and text inside SQL literals, comments or routine bodies is preserved. `.down.sql` files are skipped before reading. Missing Down is allowed; Down without Up, repeated Up, mixed marker formats or SQL before Up produce a diagnostic. Other migration-framework directives are not interpreted. Regenerate existing diagrams after upgrading to exclude rollback changes; reverting the tool revision restores the previous behavior.
+
 | SQL input | Behavior |
 | --- | --- |
 | `CREATE TABLE`, common `ALTER TABLE`, `DROP TABLE` and column/constraint changes | Update the schema. |
@@ -166,7 +168,7 @@ SQL + optional FK YAML → Schema → D2 source → D2 / ELK → SVG
 | Responsibility | Modules |
 | --- | --- |
 | CLI and orchestration | [cli.py](erd_generator/cli.py) |
-| SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `sql_statements.py`, `postgres_commands.py`, `postgres_exclusions.py`, `postgres_do.py`, `diagnostics.py` |
+| SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `migrations.py`, `sql_statements.py`, `postgres_commands.py`, `postgres_exclusions.py`, `postgres_do.py`, `diagnostics.py` |
 | Schema, preview filtering and configuration | [schema.py](erd_generator/schema.py), `validation.py`, `fk_config.py`, `layout_config.py` |
 | Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_indexes.py`, `d2_references.py`, `d2_styles.py` |
 | Rendering and layout comparison | [d2_renderer.py](erd_generator/d2_renderer.py), `d2_refinement.py`, `d2_geometry.py` |

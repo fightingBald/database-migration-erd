@@ -4,11 +4,16 @@ Turn PostgreSQL migration SQL into ER diagrams with **D2 + ELK**. No database co
 
 Outputs are `.d2` source and `.svg` images. D2 + ELK is the only backend.
 
+[![Fictional library ER diagram with 16 tables in four automatic groups](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)
+
+Entirely fictional library schema, generated with default settings. Click to enlarge or [download the SVG](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.svg).
+
 ## Features
 
 - Show tables, columns, data types, keys and relationships, with index details below each table.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
+- Read forward migrations: sql-migrate/goose Up sections and `.up.sql` files; skip rollback SQL.
 - Skip views, routine definitions, top-level procedure calls and extension setup; reject indexes targeting unknown tables.
 - Infer business groups with matching colours and automatically compare layouts for spacious diagrams, keeping a more compact result when quality improves.
 

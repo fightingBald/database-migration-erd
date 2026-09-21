@@ -394,8 +394,8 @@ def test_library_role_migration_preserves_surrounding_ddl(tmp_path):
     migrations.mkdir()
     setup = (ROOT / "tests/fixtures/postgres_role_setup.sql").read_text()
     (migrations / "V1.sql").write_text(
-        "CREATE TABLE demo_library.members(id int PRIMARY KEY);\n"
-        + setup
+        "-- +migrate Up\nCREATE TABLE demo_library.members(id int PRIMARY KEY);\n"
+        + setup.removeprefix("-- +migrate Up\n")
         + "\nCREATE TABLE demo_library.loans(id int, member_id int REFERENCES demo_library.members(id));\n",
         encoding="utf-8",
     )
@@ -546,3 +546,50 @@ def test_excluded_postgres_objects_allow_codegen_but_unknown_index_still_blocks_
     assert result.returncode == 1
     assert "Index references unknown table 'library.bokos'" in result.stderr
     assert output.read_text() == source
+
+
+@pytest.mark.parametrize("framework", ["migrate", "goose"])
+def test_codegen_generates_forward_schema_with_mixed_migration_inputs(
+    tmp_path, framework
+):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001.sql").write_text("CREATE TABLE books(id int PRIMARY KEY);")
+    (migrations / "002.sql").write_text(
+        f"-- +{framework} up\n"
+        "CREATE TABLE loans(id int, book_id int REFERENCES books(id));\n"
+        f"-- +{framework} down\nDROP TABLE loans;"
+    )
+    (migrations / "003.up.sql").write_text(
+        "ALTER TABLE loans ADD COLUMN returned_at date;"
+    )
+    (migrations / "003.down.sql").write_text(
+        "CREATE INDEX should_not_run ON unknown_table(id);"
+    )
+    output = tmp_path / "schema.d2"
+    result = cli(migrations, output, "--log-dir", tmp_path)
+    assert result.returncode == 0, result.stderr
+    source = output.read_text()
+    assert source.count("shape: sql_table") == 2
+    assert '"loans"."book_id" -> "books"."id"' in source
+    assert "returned_at" in source and "INCOMPLETE" not in source
+    assert "Down migration file=1" in result.stderr
+    assert "Down migration section=1" in result.stderr
+    assert not (tmp_path / "schema.partial.d2").exists()
+
+
+def test_codegen_rejects_ambiguous_directions_without_replacing_formal_output(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "001.sql").write_text("CREATE TABLE books(id int);")
+    (migrations / "002.sql").write_text(
+        "-- +migrate Up\nCREATE TABLE untrusted(id int);\n-- +migrate Up\n"
+    )
+    output = tmp_path / "schema.d2"
+    output.write_text("last verified diagram")
+    result = cli(migrations, output, "--log-dir", tmp_path)
+    assert result.returncode == 1
+    assert output.read_text() == "last verified diagram"
+    assert "002.sql:3" in result.stderr and "more than one Up" in result.stderr
+    preview = (tmp_path / "schema.partial.d2").read_text()
+    assert "INCOMPLETE" in preview and "untrusted" not in preview
