@@ -16,6 +16,8 @@ from erd_generator.sql_parser import _split_sql_statements
         'CREATE TABLE "订单" ("备注" text DEFAULT $$内容;文字$$)',
         "/* outer; /* inner; */ still a comment; */ CREATE TABLE a (id int)",
         "-- $$ is only a comment;\nCREATE TABLE a (id int)",
+        "CREATE PROCEDURE p() LANGUAGE SQL BEGIN ATOMIC SELECT CASE WHEN true THEN 1 ELSE 0 END; CREATE TABLE hidden(id int); END",
+        "CREATE OR REPLACE PROCEDURE p(n int = 1) LANGUAGE SQL BEGIN ATOMIC SELECT 'END;'; SELECT 2; END",
     ],
 )
 def test_semicolons_in_literals_and_comments_do_not_split_statements(statement):
@@ -45,3 +47,10 @@ def test_empty_statements_and_end_of_file():
         "CREATE TABLE a (id int)",
         "SELECT 1",
     ]
+
+
+def test_unterminated_atomic_body_is_rejected():
+    with pytest.raises(ValueError, match="Unterminated SQL routine body"):
+        _split_sql_statements(
+            "CREATE PROCEDURE p() LANGUAGE SQL BEGIN ATOMIC SELECT CASE WHEN true THEN 1 END;"
+        )

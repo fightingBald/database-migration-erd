@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -22,6 +22,7 @@ from .postgres_commands import (
     routine_definition,
 )
 from .postgres_do import neutral_do_body
+from .postgres_exclusions import SQLParseContext
 from .schema import (
     Column,
     ForeignKey,
@@ -78,9 +79,9 @@ def _identifier_name(node: exp.Expression | str | None) -> str:
     if isinstance(node, exp.Table):
         parts = []
         if node.catalog:
-            parts.append(_identifier_name(node.catalog))
+            parts.append(_identifier_name(node.args.get("catalog")))
         if node.db:
-            parts.append(_identifier_name(node.db))
+            parts.append(_identifier_name(node.args.get("db")))
         parts.append(_identifier_name(node.this))
         return ".".join(part for part in parts if part)
     if isinstance(node, exp.Schema):
@@ -595,10 +596,45 @@ def _handle_command(command: exp.Command, schema: Schema) -> bool:
 # Public API
 
 
+def _apply_statement(
+    statement: exp.Expression | None,
+    schema: Schema,
+    raw_statement: str,
+    source: Optional[str],
+    failures: List[ParseFailure],
+    in_do: bool,
+) -> Optional[str]:
+    """Apply one parsed expression to the caller's staged schema."""
+    definition = routine_definition(statement)
+    if definition:
+        return definition
+    if isinstance(statement, exp.Create):
+        _handle_create(statement, schema, raw_statement, source=source, failures=failures)
+    elif isinstance(statement, exp.Alter):
+        kind = (statement.args.get("kind") or "").upper()
+        if kind in {"TABLE", "INDEX"}:
+            _handle_alter(statement, schema)
+        else:
+            _record_failure(failures, source, raw_statement, f"Unsupported ALTER {kind}")
+    elif isinstance(statement, exp.Drop):
+        kind = (statement.args.get("kind") or "").upper()
+        if kind in {"TABLE", "INDEX"}:
+            _handle_drop(statement, schema)
+        else:
+            _record_failure(failures, source, raw_statement, f"Unsupported DROP {kind}")
+    elif isinstance(statement, exp.Command):
+        if not _handle_command(statement, schema):
+            _record_failure(failures, source, raw_statement, "Unsupported SQL command")
+    elif in_do:
+        _record_failure(failures, source, raw_statement, DO_STATEMENT_ERROR)
+    return None
+
+
 def _parse_sql(
     sql: str,
     schema: Schema,
     *,
+    context: SQLParseContext,
     source: Optional[str] = None,
     failures: Optional[List[ParseFailure]] = None,
     line_offset: int = 0,
@@ -619,10 +655,11 @@ def _parse_sql(
         tokens = tokenize_sql(raw_statement)
         if not tokens:
             continue
-        neutral = neutral_command(tokens)
-        if neutral or in_do and harmless_do_statement(tokens):
+        skipped = neutral_command(tokens) or context.skip_statement(tokens, tables=schema.keys(), in_do=in_do)
+        if skipped or in_do and harmless_do_statement(tokens):
+            context.skipped[skipped or "DO no-op"] += 1
             logging.getLogger(__name__).debug(
-                "SQL skipped for ERD: %s at %s:%s", neutral or "DO no-op", source or "<input>", start_line
+                "SQL skipped for ERD: %s at %s:%s", skipped or "DO no-op", source or "<input>", start_line
             )
             continue
         if starts_with(tokens, "DO"):
@@ -635,13 +672,15 @@ def _parse_sql(
                 _record_failure(failures, source, "", str(exc), line=start_line)
                 continue
             if neutral_do_body(body.sql):
+                context.skipped["neutral DO block"] += 1
                 logging.getLogger(__name__).debug(
                     "SQL skipped for ERD: neutral DO block at %s:%s", source or "<input>", start_line
                 )
                 continue
             staged = deepcopy(schema)
+            staged_context = deepcopy(context)
             block_failures: List[ParseFailure] = []
-            _parse_sql(body.sql, staged, source=source, failures=block_failures,
+            _parse_sql(body.sql, staged, context=staged_context, source=source, failures=block_failures,
                        line_offset=start_line - 1 + body.line_offset, in_do=True)
             if block_failures:
                 for failure in block_failures:
@@ -649,6 +688,9 @@ def _parse_sql(
             else:
                 schema.clear()
                 schema.update(staged)
+                context.materialized_views.clear()
+                context.materialized_views.update(staged_context.materialized_views)
+                context.skipped = staged_context.skipped
                 logging.getLogger(__name__).debug(
                     "Static DO block applied at %s:%s", source or "<input>", start_line
                 )
@@ -671,43 +713,33 @@ def _parse_sql(
             if in_do:
                 return
             continue
+        mutating = any(isinstance(s, (exp.Create, exp.Alter, exp.Drop, exp.Command)) for s in expressions)
+        staged = deepcopy(schema) if mutating else schema
+        statement_failures: List[ParseFailure] = []
+        skipped_definitions = []
         for statement in expressions:
-            statement_failures: List[ParseFailure] = []
-            definition = routine_definition(statement)
-            if definition:
-                logging.getLogger(__name__).debug(
-                    "SQL skipped for ERD: %s at %s:%s", definition, source or "<input>", start_line
-                )
-            elif isinstance(statement, exp.Create):
-                _handle_create(
-                    statement,
-                    schema,
-                    raw_statement,
-                    source=source,
-                    failures=statement_failures,
-                )
-            elif isinstance(statement, exp.Alter):
-                kind = (statement.args.get("kind") or "").upper()
-                if kind in {"TABLE", "INDEX"}:
-                    _handle_alter(statement, schema)
-                else:
-                    _record_failure(statement_failures, source, raw_statement, f"Unsupported ALTER {kind}")
-            elif isinstance(statement, exp.Drop):
-                kind = (statement.args.get("kind") or "").upper()
-                if kind in {"TABLE", "INDEX"}:
-                    _handle_drop(statement, schema)
-                else:
-                    _record_failure(statement_failures, source, raw_statement, f"Unsupported DROP {kind}")
-            elif isinstance(statement, exp.Command):
-                handled = _handle_command(statement, schema)
-                if not handled:
-                    _record_failure(statement_failures, source, raw_statement, "Unsupported SQL command")
-            elif in_do:
-                _record_failure(statement_failures, source, raw_statement, DO_STATEMENT_ERROR)
+            try:
+                definition = _apply_statement(statement, staged, raw_statement, source, statement_failures, in_do)
+            except ValueError:
+                # Application errors can contain SQL-derived payloads. Keep the
+                # location, roll back this statement, and continue the stream.
+                _record_failure(statement_failures, source, raw_statement,
+                                "Invalid schema change (ValueError); statement rolled back")
+            else:
+                if definition:
+                    skipped_definitions.append(definition)
+            if statement_failures:
+                break
+        if statement_failures:
             for failure in statement_failures:
                 _record_failure(failures, source, failure.sql, failure.reason, line=failure.line or start_line)
-            if in_do and statement_failures:
+            if in_do:
                 return
+        else:
+            if staged is not schema:
+                schema.clear()
+                schema.update(staged)
+            context.skipped.update(skipped_definitions)
     for table in schema.values():
         table.sync_primary_key_flags()
 
@@ -718,14 +750,18 @@ def parse_schema_from_sql(
     *,
     source: Optional[str] = None,
     failures: Optional[List[ParseFailure]] = None,
+    context: Optional[SQLParseContext] = None,
 ) -> None:
-    _parse_sql(sql, schema, source=source, failures=failures)
+    """Apply SQL; reuse context when applying multiple chunks from one stream."""
+    _parse_sql(sql, schema, context=context if context is not None else SQLParseContext(),
+               source=source, failures=failures)
 
 
 @dataclass
 class SchemaLoadResult:
     schema: Schema
     failures: List[ParseFailure]
+    skipped: dict[str, int] = field(default_factory=dict)
 
 
 def _migration_sort_key(path: Path) -> tuple:
@@ -745,10 +781,11 @@ def load_schema_result(path: str) -> SchemaLoadResult:
         raise ValueError(f"migration directory contains no SQL files: {root}")
     schema: Schema = {}
     failures: List[ParseFailure] = []
+    context = SQLParseContext()
     for file_path in files:
         parse_schema_from_sql(file_path.read_text(encoding="utf-8"), schema,
-                              source=str(file_path), failures=failures)
-    return SchemaLoadResult(schema, failures)
+                              source=str(file_path), failures=failures, context=context)
+    return SchemaLoadResult(schema, failures, dict(context.skipped))
 
 
 def load_schema_from_migrations(path: str) -> Schema:

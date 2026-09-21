@@ -6,9 +6,10 @@ Outputs are `.d2` source and `.svg` images. D2 + ELK is the only backend.
 
 ## Features
 
-- Show tables, columns, data types, keys and relationships.
+- Show tables, columns, data types, keys and relationships, with index details below each table.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
+- Skip views, routine definitions, top-level procedure calls and extension setup; reject indexes targeting unknown tables.
 - Infer business groups with matching colours and automatically compare layouts for spacious diagrams, keeping a more compact result when quality improves.
 
 ## Install
@@ -33,6 +34,8 @@ python -m erd_generator ./migrations ./generated/schema.svg
 
 Replace `./migrations` with your SQL directory. The command creates `schema.svg` plus `schema.d2` in `./generated/`. Open the SVG in a browser. Supply the migrations needed to build your schema.
 
+On SQL/schema errors, the command returns **1** and preserves the normal outputs. When possible, it writes `schema.partial.d2` and `schema.partial.svg` with a visible **INCOMPLETE** notice; details are in `parse_log/`. Fix the errors and rerun before publishing.
+
 To generate only D2 source, change the output extension. This does not require D2 to be installed:
 
 ```bash
@@ -49,6 +52,7 @@ The default uses clean styling, automatic business grouping, compact placement a
 | `--direction down` | Lay out related tables from top to bottom. |
 | `--grouping none` | Disable automatic grouping and hub placement. |
 | `--hide-types` | Hide column data types. |
+| `--hide-indexes` | Hide index details below tables; retain tooltip notes. |
 | `--style classic` | Use the original visual style. |
 
 Supports common PostgreSQL schema migrations. See the [developer guide](dev_guide.md) for supported SQL, all options, troubleshooting and development.

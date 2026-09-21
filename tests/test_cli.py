@@ -360,7 +360,7 @@ def test_missing_renderer_preserves_old_svg(tmp_path):
     assert "SVG was not updated" in result.stderr
 
 
-def test_unknown_fk_config_prevents_partial_diagram(tmp_path):
+def test_unknown_fk_config_preserves_formal_output_and_writes_preview(tmp_path):
     config = tmp_path / "fk.yaml"
     config.write_text(
         "missing: {fks: [[id, demo_library.members, id]]}", encoding="utf-8"
@@ -368,6 +368,7 @@ def test_unknown_fk_config_prevents_partial_diagram(tmp_path):
     result = cli(*input_args(tmp_path), "--fk-config", config)
     assert result.returncode == 1
     assert not (tmp_path / "schema.d2").exists()
+    assert "INCOMPLETE" in (tmp_path / "schema.partial.d2").read_text()
 
 
 def test_postgres_setup_and_static_do_generate_without_credentials_in_logs(tmp_path):
@@ -441,7 +442,9 @@ def test_unsupported_postgres_input_preserves_both_outputs(tmp_path, body, reaso
     source, image = tmp_path / "schema.d2", tmp_path / "schema.svg"
     source.write_text("old source", encoding="utf-8")
     image.write_text("old image", encoding="utf-8")
-    result = cli(migrations, image, "--log-dir", tmp_path)
+    result = cli(
+        migrations, image, "--log-dir", tmp_path, "--d2-binary", "/nonexistent/d2"
+    )
     assert result.returncode == 1
     assert source.read_text() == "old source"
     assert image.read_text() == "old image"
@@ -505,3 +508,41 @@ def test_python_entrypoint_uses_same_d2_workflow_as_module_cli(tmp_path):
     assert callable(build_d2)
     assert callable(get_last_parse_failures) and callable(load_schema_from_migrations)
     assert ParseFailure(None, "", "failure").reason == "failure"
+
+
+def test_excluded_postgres_objects_allow_codegen_but_unknown_index_still_blocks_it(
+    tmp_path,
+):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1__tables.sql").write_text(
+        "CREATE TABLE library.books(id int PRIMARY KEY);"
+        "CREATE TABLE library.loans(id int, book_id int REFERENCES library.books(id));"
+    )
+    (migrations / "V2__objects.sql").write_text(
+        "CREATE VIEW library.available AS SELECT id FROM library.books;"
+        "CREATE MATERIALIZED VIEW library.summary WITH (fillfactor=90) AS SELECT id FROM library.books WITH NO DATA;"
+        "CREATE OR REPLACE PROCEDURE library.refresh(n int = 1) LANGUAGE plpgsql "
+        "AS $body$BEGIN CREATE TABLE never_run(id int); RAISE NOTICE 'private_payload'; END;$body$;"
+        "CALL library.refresh(); DROP PROCEDURE library.refresh(integer);"
+        "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+    )
+    (migrations / "V3__indexes.sql").write_text(
+        "CREATE UNIQUE INDEX ix_summary ON library.summary(id);"
+        "DROP MATERIALIZED VIEW library.summary;"
+    )
+    output = tmp_path / "schema.d2"
+    result = cli(migrations, output, "--log-dir", tmp_path)
+    assert result.returncode == 0, result.stderr
+    source = output.read_text()
+    assert source.count("shape: sql_table") == 2
+    assert '"library.loans"."book_id" -> "library.books"."id"' in source
+    assert "summary" not in source and "never_run" not in source
+    assert "private_payload" not in result.stdout + result.stderr
+    (migrations / "V4__typo.sql").write_text(
+        "CREATE INDEX ix_typo ON library.bokos(id);"
+    )
+    result = cli(migrations, output, "--log-dir", tmp_path)
+    assert result.returncode == 1
+    assert "Index references unknown table 'library.bokos'" in result.stderr
+    assert output.read_text() == source

@@ -88,6 +88,30 @@ def test_candidate_preserves_requested_reference_visibility(
     assert options["show_references"] is enabled
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_candidate_and_verification_preserve_index_visibility(
+    refinement, monkeypatch, enabled
+):
+    schema, source, output, _ = refinement
+    options = []
+
+    def candidate(*args, **kwargs):
+        options.append(kwargs["show_indexes"])
+        return "candidate"
+
+    def measure(path, *args, **kwargs):
+        options.append(kwargs["show_indexes"])
+        return BETTER if path.read_text().startswith("candidate") else BASE
+
+    monkeypatch.setattr(d2_refinement, "build_d2", candidate)
+    monkeypatch.setattr(d2_refinement, "measure_layout", measure)
+    assert (
+        d2_refinement.render_optimized(schema, source, output, show_indexes=enabled)
+        == "compact"
+    )
+    assert options == [enabled, enabled, enabled]
+
+
 @pytest.mark.parametrize("failure", ["quality", "verification", "render"])
 def test_bad_candidate_keeps_successful_baseline(
     refinement, monkeypatch, caplog, failure

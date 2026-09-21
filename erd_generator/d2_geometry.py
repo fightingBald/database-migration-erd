@@ -8,12 +8,14 @@ import re
 import xml.etree.ElementTree as ET
 
 from .d2_business import plan_groups
+from .d2_indexes import FOOTER_STYLE, index_footer
 from .d2_renderer import D2RenderError
 from .layout_config import LayoutConfig
 from .schema import Schema
 from .validation import validate_schema
 
 NS = "{http://www.w3.org/2000/svg}"
+HTML_NS = "{http://www.w3.org/1999/xhtml}"
 NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
 
@@ -150,10 +152,16 @@ def measure_layout(
     show_types: bool = False,
     grouping: str = "auto",
     layout_config: LayoutConfig | None = None,
+    show_indexes: bool = True,
 ) -> LayoutMetrics:
     try:
         return _measure(
-            ET.parse(path).getroot(), schema, show_types, grouping, layout_config
+            ET.parse(path).getroot(),
+            schema,
+            show_types,
+            grouping,
+            layout_config,
+            show_indexes,
         )
     except (ET.ParseError, ValueError, KeyError, TypeError, StopIteration) as exc:
         # Never expose XML/SQL payloads through an optimization diagnostic.
@@ -175,13 +183,14 @@ def measure_layout(
                     "field endpoints",
                     "business regions",
                     "clipped geometry",
+                    "index footer",
                 }
                 else "unexpected SVG structure"
             )
         ) from exc
 
 
-def _measure(root, schema, show_types, grouping, config):
+def _measure(root, schema, show_types, grouping, config, show_indexes):
     canvas = tuple(map(float, root.get("viewBox", "").split()))
     if len(canvas) != 4 or not all(map(math.isfinite, canvas)) or min(canvas[2:]) <= 0:
         raise ValueError("canvas dimensions")
@@ -215,12 +224,56 @@ def _measure(root, schema, show_types, grouping, config):
                 raise ValueError("table contents")
         else:
             rectangle = group.find(f"{NS}g[@class='shape']/{NS}rect")
-            if rectangle is not None and texts and texts[0]:
-                regions.append((texts[0], Box.read(rectangle)))
+            if rectangle is not None:
+                label = group.find(f"{NS}g/{NS}foreignObject")
+                if label is not None:
+                    spans = label.findall(
+                        f".//{HTML_NS}span[@data-erd-index-line='true']"
+                    )
+                    if spans:
+                        regions.append(
+                            (
+                                "".join("".join(s.itertext()) for s in spans),
+                                Box.read(rectangle),
+                                label,
+                            )
+                        )
+                elif texts and texts[0]:
+                    regions.append(
+                        (texts[0], Box.read(rectangle), group.find(NS + "text"))
+                    )
     if set(boxes) != set(schema):
         raise ValueError("table membership")
-    _no_overlaps(list(boxes.values()))
-    if not all(bounds.contains(box) for box in boxes.values()):
+    footprints = dict(boxes)
+    for name, table in schema.items():
+        if not show_indexes or not table.indexes:
+            continue
+        expected_text = "".join(index_footer(table).splitlines())
+        matches = [
+            (box.width * box.height, i)
+            for i, (label, box, _) in enumerate(regions)
+            if label == expected_text and box.contains(boxes[name])
+        ]
+        if not matches:
+            raise ValueError("index footer")
+        # A business title could equal a footer; the closest enclosing box is
+        # the table's own native container, not an ancestor region.
+        _, i = min(matches)
+        _, footprint, label = regions.pop(i)
+        content = label.find(f".//{HTML_NS}div[@data-erd-index-footer='true']")
+        label_box = Box.read(label)
+        if (
+            content is None
+            or content.get("style") != FOOTER_STYLE
+            or not (
+                label_box.y >= boxes[name].y + boxes[name].height
+                and footprint.contains(label_box)
+            )
+        ):
+            raise ValueError("index footer")
+        footprints[name] = footprint
+    _no_overlaps(list(footprints.values()))
+    if not all(bounds.contains(box) for box in footprints.values()):
         raise ValueError("clipped geometry")
     validation = validate_schema(schema)
     expected = [
@@ -233,16 +286,16 @@ def _measure(root, schema, show_types, grouping, config):
         )
         if g.label
     ]
-    _no_overlaps([box for _, box in regions])
-    if not all(bounds.contains(box) for _, box in regions):
+    _no_overlaps([box for _, box, _ in regions])
+    if not all(bounds.contains(box) for _, box, _ in regions):
         raise ValueError("clipped geometry")
     for group in expected:
         found = next(
             (
                 i
-                for i, (label, box) in enumerate(regions)
+                for i, (label, box, _) in enumerate(regions)
                 if label == group.label
-                and all(box.contains(boxes[n], heading=24) for n in group.tables)
+                and all(box.contains(footprints[n], heading=24) for n in group.tables)
             ),
             None,
         )
@@ -301,7 +354,7 @@ def _measure(root, schema, show_types, grouping, config):
     return LayoutMetrics(
         canvas[2],
         canvas[3],
-        sum(b.width * b.height for b in boxes.values()),
+        sum(b.width * b.height for b in footprints.values()),
         sum(lengths),
         max(lengths, default=0),
         _crossings(routes),

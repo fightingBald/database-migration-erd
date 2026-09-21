@@ -26,6 +26,7 @@ def render_optimized(
     grouping: str = "auto",
     layout_config: LayoutConfig | None = None,
     show_references: bool = False,
+    show_indexes: bool = True,
 ) -> str:
     """The caller writes the baseline source first, retaining it on render failure.
 
@@ -39,7 +40,10 @@ def render_optimized(
     original = source.read_text(encoding="utf-8")
     output.parent.mkdir(parents=True, exist_ok=True)
     options = dict(
-        show_types=show_types, grouping=grouping, layout_config=layout_config
+        show_types=show_types,
+        grouping=grouping,
+        layout_config=layout_config,
+        show_indexes=show_indexes,
     )
     selected = "balanced"
     with tempfile.TemporaryDirectory(

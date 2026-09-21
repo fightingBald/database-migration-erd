@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from hashlib import sha256
 
-from .d2_emit import container_lines, diagram_lines, relationship_lines
+from .d2_emit import container_lines, diagram_lines, relationship_lines, table_path
 from .d2_emit import quote_d2 as quote_d2
 from .d2_business import BusinessGroup, plan_groups
 from .d2_grouping import centered_ranks, group_tables
@@ -52,6 +52,7 @@ def _component_lines(
     groups: tuple[BusinessGroup, ...],
     *,
     show_types: bool,
+    show_indexes: bool,
     style: str,
     direction: str,
     automatic: bool,
@@ -65,7 +66,14 @@ def _component_lines(
     groups = tuple(g for g in groups if g.tables[0] in members)
     if len(groups) == 1 and not groups[0].label:
         ranks = (
-            table_ranks(component, schema, show_types, direction, center=not compact)
+            table_ranks(
+                component,
+                schema,
+                show_types,
+                direction,
+                center=not compact,
+                show_indexes=show_indexes,
+            )
             if inherited_palette and automatic
             else None
         )
@@ -73,12 +81,13 @@ def _component_lines(
             {n: schema[n] for n in members},
             component.relationships,
             show_types=show_types,
+            show_indexes=show_indexes,
             style=style,
             metadata=metadata,
             palette=inherited_palette,
             ranks=ranks,
             references=references,
-        ), {n: quote_d2(n) for n in members}
+        ), {n: table_path(schema[n], show_indexes) for n in members}
     keys = {
         g.key: f"_erd_group_{sha256(g.key.encode()).hexdigest()[:16]}"
         if g.label
@@ -129,6 +138,7 @@ def _component_lines(
                         for names in communities
                     ),
                     show_types=show_types,
+                    show_indexes=show_indexes,
                     style=style,
                     direction=direction,
                     automatic=automatic,
@@ -138,7 +148,14 @@ def _component_lines(
                     references=references,
                 )
             ranks = (
-                table_ranks(part, schema, show_types, direction, center=not compact)
+                table_ranks(
+                    part,
+                    schema,
+                    show_types,
+                    direction,
+                    center=not compact,
+                    show_indexes=show_indexes,
+                )
                 if automatic
                 else None
             )
@@ -146,12 +163,13 @@ def _component_lines(
                 {n: schema[n] for n in part.tables},
                 part.relationships,
                 show_types=show_types,
+                show_indexes=show_indexes,
                 style=style,
                 palette=palette,
                 metadata=metadata,
                 ranks=ranks,
                 references=references,
-            ), {n: quote_d2(n) for n in part.tables}
+            ), {n: table_path(schema[n], show_indexes) for n in part.tables}
 
         region = Component(group.tables, edges)
         # Grid boundaries are safe only when no external FK enters a cell.
@@ -164,11 +182,19 @@ def _component_lines(
             # No ancestor can reference these packed cells. Their paths need
             # not escape this region; every FK is emitted inside its own cell.
             body = _packed_lines(
-                plan_layout(tables, edges, show_types=show_types, direction=direction),
+                plan_layout(
+                    tables,
+                    edges,
+                    show_types=show_types,
+                    direction=direction,
+                    show_indexes=show_indexes,
+                ),
                 lambda part: emit(part)[0],
                 direction,
             )
-        size = estimate_size(region, schema, show_types, direction)
+        size = estimate_size(
+            region, schema, show_types, direction, show_indexes=show_indexes
+        )
         weights[key] = size[1 if direction in {"right", "left"} else 0]
         lines.extend(
             container_lines(
@@ -208,6 +234,7 @@ def build_d2(
     layout_config: LayoutConfig | None = None,
     layout_strategy: str = "balanced",
     show_references: bool = False,
+    show_indexes: bool = True,
 ) -> str:
     if direction not in {"up", "down", "left", "right"}:
         raise ValueError("D2 direction must be up, down, left or right")
@@ -245,6 +272,7 @@ def build_d2(
         schema,
         result.relationships,
         show_types=show_types,
+        show_indexes=show_indexes,
         direction=direction,
         keep_together=tuple(g.tables for g in groups if g.label),
     )
@@ -256,6 +284,7 @@ def build_d2(
                 component,
                 groups,
                 show_types=show_types,
+                show_indexes=show_indexes,
                 style=style,
                 direction=direction,
                 automatic=grouping == "auto",
