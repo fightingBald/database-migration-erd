@@ -1,9 +1,9 @@
 """Conservative name families plus relationship communities; never change Schema."""
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-import re
 
 from .d2_grouping import group_tables
 from .d2_layout import connected_components

@@ -6,11 +6,11 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "main",
-    "build_d2",
-    "load_schema_from_migrations",
-    "get_last_parse_failures",
     "ParseFailure",
+    "build_d2",
+    "get_last_parse_failures",
+    "load_schema_from_migrations",
+    "main",
 ]
 
 

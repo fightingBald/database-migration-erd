@@ -24,7 +24,7 @@ def field_markers(root):
             continue
         texts = group.findall(NS + "text")
         name = "".join(texts[0].itertext())
-        for field, marker in zip(texts[1::3], texts[3::3]):
+        for field, marker in zip(texts[1::3], texts[3::3], strict=True):
             result[name, "".join(field.itertext())] = marker
     return result
 
@@ -70,7 +70,7 @@ def test_cross_group_composite_labels_stay_at_source_rows(
         if "FK →" in "".join(marker.itertext())
     }
     assert found == expected
-    for (name, field), label in expected.items():
+    for name, field in expected:
         box, marker = boxes[name], markers[name, field]
         row = next(i for i, col in enumerate(schema[name].columns) if col.name == field)
         assert box["x"] < float(marker.get("x")) < box["x"] + box["width"]

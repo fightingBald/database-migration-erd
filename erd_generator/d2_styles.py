@@ -1,8 +1,8 @@
 """Native D2 presentation settings; independent of schema parsing and rendering."""
 
+from colorsys import hls_to_rgb
 from dataclasses import dataclass
 from hashlib import sha256
-from colorsys import hls_to_rgb
 
 STYLES = ("clean", "classic")
 COMPONENT_PADDING = 16

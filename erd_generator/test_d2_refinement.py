@@ -1,16 +1,15 @@
 """Layout selection must improve geometry without weakening output guarantees."""
 
-from dataclasses import replace
 import logging
+from dataclasses import replace
 
 import pytest
 
 from erd_generator import d2_refinement
-from erd_generator.d2_renderer import D2RenderConfig, D2RenderError
 from erd_generator.d2_geometry import LayoutMetrics, improves_affinity, improves_layout
+from erd_generator.d2_renderer import D2RenderConfig, D2RenderError
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Table
-
 
 BASE = LayoutMetrics(1000, 800, 100000, 8000, 2000, 40)
 BETTER = replace(BASE, width=800, total_length=7000, longest=1800)
@@ -101,7 +100,7 @@ def test_publishes_matching_source_and_svg_and_removes_temporary_files(refinemen
 def test_candidate_preserves_requested_reference_visibility(
     refinement, monkeypatch, enabled
 ):
-    schema, source, output, calls = refinement
+    schema, source, output, _calls = refinement
     options = {}
 
     def candidate(*args, **kwargs):
@@ -169,7 +168,7 @@ def test_bad_candidate_keeps_successful_baseline(
 
 
 def test_failed_baseline_never_replaces_existing_svg(refinement, monkeypatch):
-    schema, source, output, calls = refinement
+    schema, source, output, _calls = refinement
 
     def fail(*a, **kw):
         raise D2RenderError("D2 render failed")
@@ -209,7 +208,7 @@ def test_skips_unnecessary_second_render(refinement, monkeypatch, mode):
 
 
 def test_failed_source_publication_keeps_old_svg(refinement, monkeypatch):
-    schema, source, output, calls = refinement
+    schema, source, output, _calls = refinement
 
     def fail(*a, **kw):
         raise OSError("publication failed")
@@ -222,7 +221,7 @@ def test_failed_source_publication_keeps_old_svg(refinement, monkeypatch):
 
 
 def test_rejects_conflicting_output_paths_before_rendering(refinement):
-    schema, source, output, calls = refinement
+    schema, source, _output, calls = refinement
     with pytest.raises(D2RenderError):
         d2_refinement.render_optimized(schema, source, source)
     assert calls == []

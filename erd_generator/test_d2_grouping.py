@@ -1,8 +1,8 @@
-from itertools import combinations
+from itertools import combinations, pairwise
 
 import pytest
 
-from erd_generator.d2_grouping import group_tables, layout_ranks, centered_ranks
+from erd_generator.d2_grouping import centered_ranks, group_tables, layout_ranks
 from erd_generator.validation import Relationship
 
 
@@ -74,7 +74,7 @@ def test_graph_without_distinct_communities_keeps_existing_layout(shape):
 
 def test_layout_ranks_fold_a_chain_without_changing_relationships():
     names = tuple(f"t{i}" for i in range(10))
-    pairs = tuple(zip(names, names[1:]))
+    pairs = tuple(pairwise(names))
     ranks = layout_ranks(names, pairs)
     assert len(set(ranks.values())) == 2
     assert all(ranks[a] != ranks[b] for a, b in pairs)
@@ -85,7 +85,7 @@ def test_layout_ranks_fold_a_chain_without_changing_relationships():
 def test_shared_hubs_have_neighbors_on_both_sides_without_changing_edges(hub_count):
     hubs = tuple(f"hub_{i}" for i in range(hub_count))
     domains = ("a", "b", "c", "d")
-    pairs = tuple((d, h) for d in domains for h in hubs) + tuple(zip(hubs, hubs[1:]))
+    pairs = tuple((d, h) for d in domains for h in hubs) + tuple(pairwise(hubs))
     names = (*domains, *hubs)
     ranks = centered_ranks(names, pairs, hubs=hubs, weights={n: 1 for n in names})
     for hub in hubs:
@@ -104,7 +104,7 @@ def test_shared_hubs_have_neighbors_on_both_sides_without_changing_edges(hub_cou
 def test_unconnected_neighbors_balance_by_size_around_hub():
     names = ("a", "b", "c", "d", "hub")
     pairs = tuple((n, "hub") for n in names[:-1])
-    weights = dict(zip(names, (9, 3, 3, 3, 1)))
+    weights = dict(zip(names, (9, 3, 3, 3, 1), strict=True))
     ranks = centered_ranks(names, pairs, hubs=("hub",), weights=weights)
     assert ranks["a"] < ranks["hub"]
     assert all(ranks[n] > ranks["hub"] for n in ("b", "c", "d"))
@@ -126,7 +126,7 @@ def test_business_hub_can_be_centered_without_an_explicit_singleton_candidate():
 
 def test_linked_outer_pair_does_not_push_all_independent_neighbors_to_one_side():
     names = (*"abcdefg", "hub")
-    pairs = tuple((n, "hub") for n in "abcdef") + (("f", "g"),)
+    pairs = (*tuple((n, "hub") for n in "abcdef"), ("f", "g"))
     ranks = centered_ranks(names, pairs, hubs=("hub",))
     left = sum(rank < ranks["hub"] for rank in ranks.values())
     right = sum(rank > ranks["hub"] for rank in ranks.values())

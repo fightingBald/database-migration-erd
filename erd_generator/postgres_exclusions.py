@@ -4,10 +4,10 @@ This scope policy is separate from the proof of neutrality used for DO blocks.
 Names are exact identifier tuples: no search_path guessing or short-name matches.
 """
 
-from dataclasses import dataclass, field
+import re
 from collections import Counter
 from collections.abc import Collection
-import re
+from dataclasses import dataclass, field
 
 from sqlglot.tokens import Token, TokenType
 
@@ -128,8 +128,11 @@ class SQLParseContext:
     ) -> str | None:
         kind = routine_kind(tokens)
         if kind and any(
-            is_word(token, "AS")
-            and tokens[i + 1].token_type in {TokenType.STRING, TokenType.HEREDOC_STRING}
+            (
+                is_word(token, "AS")
+                and tokens[i + 1].token_type
+                in {TokenType.STRING, TokenType.HEREDOC_STRING}
+            )
             or starts_with(tokens[i : i + 2], "BEGIN", "ATOMIC")
             for i, token in enumerate(tokens[:-1])
         ):

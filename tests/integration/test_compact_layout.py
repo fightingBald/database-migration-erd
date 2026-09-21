@@ -1,9 +1,9 @@
 """Verify actual ELK geometry, including table sizes and FK row endpoints."""
 
-from itertools import combinations
-from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from itertools import combinations, pairwise
+from pathlib import Path
 
 import pytest
 
@@ -169,7 +169,7 @@ def arrow_routes(root):
         if "connection" not in path.get("class", "").split():
             continue
         coords = list(map(float, re.findall(r"-?\d+(?:\.\d+)?", path.get("d"))))
-        points = list(zip(coords[::2], coords[1::2]))
+        points = list(zip(coords[::2], coords[1::2], strict=True))
         # Normalize to FK source -> referenced field using the actual arrowhead.
         assert bool(path.get("marker-start")) != bool(path.get("marker-end"))
         if path.get("marker-start"):
@@ -199,7 +199,7 @@ def assert_fk_arrows(schema, root):
     for fk in relationships:
         if fk.table == fk.ref_table:
             continue  # ELK's existing self-loop limitation uses table boundaries.
-        for source, target in zip(fk.columns, fk.ref_columns):
+        for source, target in zip(fk.columns, fk.ref_columns, strict=True):
             assert any(
                 at_field(route[0], fk.table, source)
                 and at_field(route[-1], fk.ref_table, target)
@@ -229,7 +229,7 @@ def test_forty_related_tables_reduce_canvas_and_routes_without_losing_arrows(tmp
 
     def lengths(root):
         return [
-            sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in zip(route, route[1:]))
+            sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in pairwise(route))
             for route in arrow_routes(root)
         ]
 

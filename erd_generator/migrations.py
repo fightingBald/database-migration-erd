@@ -4,7 +4,6 @@ import re
 
 from .sql_statements import SQLLexError, split_sql_statements, tokenize_sql
 
-
 _DIRECTION = re.compile(
     r"^[ \t]*--[ \t]*\+(migrate|goose)[ \t]+(Up|Down)"
     r"(?:[ \t]+notransaction)?[ \t]*\r?$",

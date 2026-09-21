@@ -49,9 +49,9 @@ def split_sql_statements(sql: str) -> list[str]:
             routine = routine_kind(tokens[i : i + 4]) is not None
         # SQL-language routine bodies are not necessarily quoted. Keep their
         # statements opaque just like dollar strings; CASE has its own END.
-        if routine and starts_with(tokens[i : i + 2], "BEGIN", "ATOMIC"):
-            depth += 1
-        elif depth and is_word(token, "CASE"):
+        if (routine and starts_with(tokens[i : i + 2], "BEGIN", "ATOMIC")) or (
+            depth and is_word(token, "CASE")
+        ):
             depth += 1
         elif depth and is_word(token, "END"):
             depth -= 1
@@ -82,7 +82,7 @@ def is_word(token: Token, word: str) -> bool:
 
 def starts_with(tokens: list[Token], *words: str) -> bool:
     return len(tokens) >= len(words) and all(
-        is_word(token, word) for token, word in zip(tokens, words)
+        is_word(token, word) for token, word in zip(tokens, words, strict=False)
     )
 
 

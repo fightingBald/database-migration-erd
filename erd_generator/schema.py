@@ -1,8 +1,9 @@
 """Schema data structures for ERD generation."""
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 
 @dataclass
@@ -19,26 +20,23 @@ class Column:
 class ForeignKey:
     """A foreign key constraint linking two tables."""
 
-    columns: Tuple[str, ...]
+    columns: tuple[str, ...]
     ref_table: str
-    ref_columns: Tuple[str, ...]
-    name: Optional[str] = None
+    ref_columns: tuple[str, ...]
+    name: str | None = None
 
 
 @dataclass
 class Index:
     """Index metadata, including unique and partial information."""
 
-    name: Optional[str]
-    columns: Tuple[str, ...]
-    expression_columns: Tuple[str, ...] = field(default_factory=tuple)
-    column_names: Tuple[Optional[str], ...] = field(default_factory=tuple)
+    name: str | None
+    columns: tuple[str, ...]
+    expression_columns: tuple[str, ...] = field(default_factory=tuple)
+    column_names: tuple[str | None, ...] = field(default_factory=tuple)
     unique: bool = False
-    method: Optional[str] = None
-    where: Optional[str] = None
-
-    def uses_expression(self) -> bool:
-        return bool(self.expression_columns)
+    method: str | None = None
+    where: str | None = None
 
 
 @dataclass
@@ -46,14 +44,14 @@ class Table:
     """A database table comprised of columns and constraints."""
 
     name: str
-    columns: List[Column] = field(default_factory=list)
-    primary_key: Set[str] = field(default_factory=set)
-    foreign_keys: List[ForeignKey] = field(default_factory=list)
-    indexes: List[Index] = field(default_factory=list)
-    constraint_types: Dict[str, str] = field(default_factory=dict)
-    primary_key_name: Optional[str] = None
+    columns: list[Column] = field(default_factory=list)
+    primary_key: set[str] = field(default_factory=set)
+    foreign_keys: list[ForeignKey] = field(default_factory=list)
+    indexes: list[Index] = field(default_factory=list)
+    constraint_types: dict[str, str] = field(default_factory=dict)
+    primary_key_name: str | None = None
 
-    def get_column(self, column_name: str) -> Optional[Column]:
+    def get_column(self, column_name: str) -> Column | None:
         target = column_name.lower()
         for column in self.columns:
             if column.name.lower() == target:
@@ -72,7 +70,9 @@ class Table:
             self.primary_key.add(column.name)
         self.sync_primary_key_flags()
 
-    def add_foreign_key(self, foreign_key: ForeignKey, constraint_name: Optional[str] = None) -> None:
+    def add_foreign_key(
+        self, foreign_key: ForeignKey, constraint_name: str | None = None
+    ) -> None:
         if constraint_name:
             key = constraint_name.lower()
             foreign_key.name = key
@@ -82,7 +82,9 @@ class Table:
             self.constraint_types[foreign_key.name] = "foreign_key"
         self.foreign_keys.append(foreign_key)
 
-    def set_primary_key(self, columns: Iterable[str], constraint_name: Optional[str] = None) -> None:
+    def set_primary_key(
+        self, columns: Iterable[str], constraint_name: str | None = None
+    ) -> None:
         self.primary_key = {column for column in columns}
         if constraint_name:
             key = constraint_name.lower()
@@ -93,10 +95,10 @@ class Table:
     def add_index(
         self,
         index: Index,
-        constraint_name: Optional[str] = None,
+        constraint_name: str | None = None,
         constraint_type: str = "index",
     ) -> None:
-        name_key: Optional[str] = None
+        name_key: str | None = None
         if constraint_name:
             name_key = constraint_name.lower()
             index.name = name_key
@@ -122,7 +124,9 @@ class Table:
 
     def drop_column(self, column_name: str) -> None:
         target = column_name.lower()
-        self.columns = [column for column in self.columns if column.name.lower() != target]
+        self.columns = [
+            column for column in self.columns if column.name.lower() != target
+        ]
         if target in {col.lower() for col in self.primary_key}:
             self.primary_key.clear()
             if self.primary_key_name:
@@ -134,7 +138,9 @@ class Table:
             if fk.name and target in {col.lower() for col in fk.columns}
         }
         self.foreign_keys = [
-            fk for fk in self.foreign_keys if target not in {col.lower() for col in fk.columns}
+            fk
+            for fk in self.foreign_keys
+            if target not in {col.lower() for col in fk.columns}
         ]
         for name in fk_names:
             if name:
@@ -142,7 +148,8 @@ class Table:
         removed_index_names = {
             idx.name.lower()
             for idx in self.indexes
-            if idx.name and any((col_name or "").lower() == target for col_name in idx.column_names)
+            if idx.name
+            and any((col_name or "").lower() == target for col_name in idx.column_names)
         }
         self.indexes = [
             idx
@@ -173,9 +180,13 @@ class Table:
             self.primary_key_name = None
             self.sync_primary_key_flags()
         elif constraint_type == "foreign_key":
-            self.foreign_keys = [fk for fk in self.foreign_keys if (fk.name or "").lower() != key]
+            self.foreign_keys = [
+                fk for fk in self.foreign_keys if (fk.name or "").lower() != key
+            ]
         elif constraint_type == "unique":
-            self.indexes = [idx for idx in self.indexes if (idx.name or "").lower() != key]
+            self.indexes = [
+                idx for idx in self.indexes if (idx.name or "").lower() != key
+            ]
 
     def rename_constraint(self, old_name: str, new_name: str) -> None:
         old_key = old_name.lower()
@@ -202,7 +213,7 @@ class Table:
         for column in self.columns:
             if column.name.lower() == old_key:
                 column.name = new_name
-        updated_pk: Set[str] = set()
+        updated_pk: set[str] = set()
         for column in self.primary_key:
             if column.lower() == old_key:
                 updated_pk.add(new_name)
@@ -210,9 +221,14 @@ class Table:
                 updated_pk.add(column)
         self.primary_key = updated_pk
         for fk in self.foreign_keys:
-            fk.columns = tuple(new_name if col.lower() == old_key else col for col in fk.columns)
+            fk.columns = tuple(
+                new_name if col.lower() == old_key else col for col in fk.columns
+            )
             if fk.ref_table == self.name:
-                fk.ref_columns = tuple(new_name if col.lower() == old_key else col for col in fk.ref_columns)
+                fk.ref_columns = tuple(
+                    new_name if col.lower() == old_key else col
+                    for col in fk.ref_columns
+                )
         for idx in self.indexes:
             columns = list(idx.columns)
             column_names = list(idx.column_names or ())
@@ -249,7 +265,9 @@ class Table:
         for idx in self.indexes:
             if (idx.name or "").lower() == old_key:
                 idx.name = new_key
-                self.constraint_types[new_key] = self.constraint_types.pop(old_key, "index")
+                self.constraint_types[new_key] = self.constraint_types.pop(
+                    old_key, "index"
+                )
                 return True
         return False
 
@@ -259,17 +277,7 @@ class Table:
             column.is_primary_key = column.name.lower() in pk_columns
 
 
-Schema = Dict[str, Table]
-
-
-def iter_columns(schema: Schema) -> Iterable[Column]:
-    for table in schema.values():
-        yield from table.columns
-
-
-def iter_foreign_keys(schema: Schema) -> Iterable[ForeignKey]:
-    for table in schema.values():
-        yield from table.foreign_keys
+Schema = dict[str, Table]
 
 
 def rename_table(schema: Schema, old_name: str, new_name: str) -> None:
@@ -284,7 +292,9 @@ def rename_table(schema: Schema, old_name: str, new_name: str) -> None:
                 fk.ref_table = new_name
 
 
-def rename_column_in_schema(schema: Schema, table_name: str, old_name: str, new_name: str) -> None:
+def rename_column_in_schema(
+    schema: Schema, table_name: str, old_name: str, new_name: str
+) -> None:
     table = schema.get(table_name)
     if not table:
         return
@@ -295,21 +305,29 @@ def rename_column_in_schema(schema: Schema, table_name: str, old_name: str, new_
         for fk in other.foreign_keys:
             if fk.ref_table == table_name:
                 fk.ref_columns = tuple(
-                    new_name if col.lower() == old_name.lower() else col for col in fk.ref_columns
+                    new_name if col.lower() == old_name.lower() else col
+                    for col in fk.ref_columns
                 )
 
 
-def drop_column_in_schema(schema: Schema, table_name: str, column_name: str, *, cascade: bool = False) -> None:
+def drop_column_in_schema(
+    schema: Schema, table_name: str, column_name: str, *, cascade: bool = False
+) -> None:
     table = schema[table_name]
     was_primary = column_name.lower() in {col.lower() for col in table.primary_key}
     table.drop_column(column_name)
     if not cascade:
         return
     for other in schema.values():
-        removed = [fk for fk in other.foreign_keys if fk.ref_table == table_name and (
-            column_name.lower() in {col.lower() for col in fk.ref_columns}
-            or (not fk.ref_columns and was_primary)
-        )]
+        removed = [
+            fk
+            for fk in other.foreign_keys
+            if fk.ref_table == table_name
+            and (
+                column_name.lower() in {col.lower() for col in fk.ref_columns}
+                or (not fk.ref_columns and was_primary)
+            )
+        ]
         other.foreign_keys = [fk for fk in other.foreign_keys if fk not in removed]
         for fk in removed:
             if fk.name:

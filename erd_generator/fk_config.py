@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .diagnostics import ParseFailure
 from .schema import ForeignKey, Schema, Table
@@ -84,10 +85,7 @@ def load_foreign_key_config(
         if not isinstance(table_key, str) or not table_key.strip():
             _record(failures, source, "table name must be a nonempty string")
             continue
-        if isinstance(payload, dict):
-            raw_entries = payload.get("fks", [])
-        else:
-            raw_entries = payload
+        raw_entries = payload.get("fks", []) if isinstance(payload, dict) else payload
         if not isinstance(raw_entries, (list, tuple)):
             _record(failures, source, f"{table_key}: fks must be a sequence")
             continue

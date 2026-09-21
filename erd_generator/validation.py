@@ -1,7 +1,7 @@
 """Validate schema relationships without inventing graph objects or changing SQL metadata."""
 
-from dataclasses import dataclass
 from copy import deepcopy
+from dataclasses import dataclass
 
 from .schema import ForeignKey, Schema, Table
 

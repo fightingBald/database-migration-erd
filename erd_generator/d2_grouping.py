@@ -177,7 +177,9 @@ def _balance_outer(
     loads = [0.0] * classes
     for component in sorted(components, key=lambda c: (-sum(weights[n] for n in c), c)):
 
-        def cost(offset: int) -> tuple[float, float, int]:
+        def cost(
+            offset: int, component: tuple[str, ...] = component
+        ) -> tuple[float, float, int]:
             trial = loads.copy()
             for name in component:
                 trial[(ranks[name] + offset) % classes] += weights[name]

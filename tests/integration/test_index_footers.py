@@ -1,16 +1,16 @@
-from copy import deepcopy
-from pathlib import Path
+import itertools
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
 from erd_generator.d2 import build_d2
 from erd_generator.d2_geometry import measure_layout
-from erd_generator.d2_renderer import render_d2
-from erd_generator.d2_renderer import D2RenderError
 from erd_generator.d2_indexes import index_footer
+from erd_generator.d2_renderer import D2RenderError, render_d2
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Index, Table
 from erd_generator.sql_parser import load_schema_result
@@ -184,7 +184,9 @@ def test_forty_indexed_tables_in_six_unequal_automatic_groups(tmp_path, connecte
     )
     roots = []
     for prefix, size in zip(
-        ("books", "loans", "members", "fees", "staff", "rooms"), (10, 8, 7, 6, 5, 4)
+        ("books", "loans", "members", "fees", "staff", "rooms"),
+        (10, 8, 7, 6, 5, 4),
+        strict=True,
     ):
         root = f"{prefix}_{suffixes[0]}"
         roots.append(root)
@@ -206,7 +208,7 @@ def test_forty_indexed_tables_in_six_unequal_automatic_groups(tmp_path, connecte
                 ],
             )
     if connected:
-        for left, right in zip(roots, roots[1:]):
+        for left, right in itertools.pairwise(roots):
             schema[right].foreign_keys.append(ForeignKey(("owner",), left, ("id",)))
     for strategy in ("balanced", "compact"):
         source = tmp_path / f"{strategy}.d2"
