@@ -7,19 +7,17 @@ from copy import deepcopy
 import pytest
 
 from erd_generator.d2 import build_d2
-from erd_generator.d2_business import plan_groups
 from erd_generator.d2_renderer import render_d2
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import ForeignKey
-from erd_generator.validation import validate_schema
-from tests.integration.test_compact_layout import (
-    NS,
+from tests.support.schemas import business_schema, related_schema, table
+from tests.support.svg import (
     arrow_routes,
     assert_compact,
     assert_fk_arrows,
+    assert_named_regions,
     assert_no_overlaps,
-    related_schema,
-    table,
+    region_boxes,
     table_boxes,
 )
 
@@ -37,43 +35,6 @@ def render(schema, directory, **options):
     assert_no_overlaps(boxes)
     assert_fk_arrows(schema, root)
     return root
-
-
-def region_boxes(root):
-    result = {}
-    for group in root.iter(NS + "g"):
-        label = group.find(NS + "text")
-        if label is None:
-            continue
-        text = "".join(label.itertext())
-        if not text:
-            continue
-        shape = group.find(f"{NS}g[@class='shape']/{NS}rect")
-        if shape is not None:
-            result[text] = {
-                key: float(shape.get(key)) for key in ("x", "y", "width", "height")
-            }
-    return result
-
-
-def assert_named_regions(root, schema, config=None):
-    boxes, regions = table_boxes(root), region_boxes(root)
-    expected = [
-        g
-        for g in plan_groups(
-            schema, validate_schema(schema).relationships, config=config
-        )
-        if g.label
-    ]
-    assert len(regions) == len(expected)
-    assert_no_overlaps(regions)
-    for group in expected:
-        region = regions[group.label]
-        for name in group.tables:
-            box = boxes[name]
-            assert region["x"] <= box["x"] and region["y"] + 24 <= box["y"]
-            assert box["x"] + box["width"] <= region["x"] + region["width"] + 1
-            assert box["y"] + box["height"] <= region["y"] + region["height"] + 1
 
 
 @pytest.mark.parametrize("direction", ["right", "down"])
@@ -94,37 +55,6 @@ def test_auto_business_regions_pack_isolated_tables_without_stretching_rows(
     for name, box in table_boxes(root).items():
         assert box["header"] == 36
         assert box["height"] == 36 * (len(schema[name].columns) + 1)
-
-
-def business_schema():
-    schema = {}
-    suffixes = ("root", "details", "files", "links", "contacts")
-    roots = []
-    for prefix in ("books", "loans", "members"):
-        names = [f"demo_library.{prefix}_{suffix}" for suffix in suffixes]
-        roots.append(names[0])
-        for i, name in enumerate(names):
-            schema[name] = table(name, 5 + i % 3)
-            if i:
-                schema[name].foreign_keys = [
-                    ForeignKey(
-                        ("field_1", "field_3"),
-                        names[0],
-                        ("id", "field_2"),
-                        f"pair_{prefix}",
-                    )
-                ]
-    for i, root in enumerate(roots):
-        schema[root].foreign_keys = [
-            ForeignKey(
-                ("field_1", "field_3"),
-                roots[(i + 1) % 3],
-                ("id", "field_2"),
-                "cross_pair",
-            )
-        ]
-    schema[roots[0]].foreign_keys.append(ForeignKey(("field_4",), roots[0], ("id",)))
-    return schema
 
 
 @pytest.mark.parametrize("style", ["clean", "classic"])
