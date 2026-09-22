@@ -4,6 +4,7 @@ from .d2_indexes import (
     FOOTER_FONT_SIZE,
     TABLE_BODY_KEY,
     footer_markup,
+    footer_width,
     index_footer,
     sorted_indexes,
 )
@@ -119,11 +120,12 @@ def table_lines(
     for fk in relationships:
         foreign_columns.setdefault(fk.table, set()).update(fk.columns)
     for name, table in sorted(schema.items()):
-        footer = index_footer(table) if show_indexes else ""
+        footer = index_footer(table, show_types) if show_indexes else ""
         key = TABLE_BODY_KEY if footer else quote_d2(name)
         body = [f"{key}: {{", "  shape: sql_table"]
         if footer:
             body.append(f"  label: {quote_d2(name)}")
+            body.append(f"  width: {footer_width(footer)}")
         if style == "clean":
             body.extend(CLEAN_TABLE)
         if palette is not None:
@@ -176,13 +178,13 @@ def table_lines(
                     f"{quote_d2(name)}: {{",
                     "  shape: rectangle",
                     "  label: |md",
-                    f"    {footer_markup(footer)}",
+                    f"    {footer_markup(footer, name)}",
                     "  |",
                     "  label.near: bottom-left",
                     "  style.fill: transparent",
                     "  style.stroke-width: 0",
                     f"  style.font-size: {FOOTER_FONT_SIZE}",
-                    '  style.font-color: "#64748B"',
+                    '  style.font-color: "#475569"',
                     *("  " + line for line in body),
                     "}",
                     "",

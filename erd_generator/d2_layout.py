@@ -2,12 +2,12 @@
 
 import heapq
 import math
-import unicodedata
 from collections import deque
 from dataclasses import dataclass
 
+from .d2_dimensions import table_width
 from .d2_grouping import centered_ranks, layout_ranks
-from .d2_indexes import FOOTER_FONT_SIZE, index_footer
+from .d2_indexes import FOOTER_FONT_SIZE, footer_width, index_footer
 from .d2_styles import COMPONENT_PADDING, GRID_GAP
 from .schema import Schema, Table
 from .validation import Relationship
@@ -65,36 +65,13 @@ def connected_components(
     )
 
 
-def _text_width(text: str) -> int:
-    return max(
-        (
-            sum(
-                0
-                if unicodedata.combining(char)
-                else 2
-                if unicodedata.east_asian_width(char) in {"W", "F"}
-                else 1
-                for char in line
-            )
-            for line in text.splitlines()
-        ),
-        default=0,
-    )
-
-
 def _table_size(
     table: Table, show_types: bool, show_indexes: bool = True
 ) -> tuple[int, int]:
-    names = max((_text_width(c.name) for c in table.columns), default=0)
-    types = (
-        max((_text_width(c.data_type) for c in table.columns), default=0)
-        if show_types
-        else 0
-    )
-    width = max(180, 20 + 11 * _text_width(table.name), 80 + 10 * (names + types))
+    width = table_width(table, show_types)
     height = 36 * (len(table.columns) + 1)
-    if show_indexes and (footer := index_footer(table)):
-        width = max(width, 8 * _text_width(footer)) + 2 * COMPONENT_PADDING
+    if show_indexes and (footer := index_footer(table, show_types)):
+        width = max(width, footer_width(footer)) + 2 * COMPONENT_PADDING
         height += (
             int(1.5 * FOOTER_FONT_SIZE * len(footer.splitlines()))
             + 2 * COMPONENT_PADDING

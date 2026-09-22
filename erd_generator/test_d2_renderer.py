@@ -85,6 +85,21 @@ def test_invalid_svg_cannot_replace_existing_artifact(monkeypatch, paths, conten
     assert paths[1].read_text() == "old svg"
 
 
+def test_caption_alignment_failure_preserves_previous_artifact(monkeypatch, paths):
+    fake_d2(monkeypatch)
+
+    def invalid_caption(svg):
+        raise ValueError("index footer bounds")
+
+    monkeypatch.setattr(
+        "erd_generator.d2_renderer.align_index_captions", invalid_caption
+    )
+    with pytest.raises(D2RenderError, match="index footer alignment"):
+        render_d2(*paths)
+    assert paths[1].read_text() == "old svg"
+    assert set(paths[0].parent.iterdir()) == set(paths)
+
+
 def test_missing_executable_has_actionable_error(monkeypatch, paths):
     def missing(*args, **kwargs):
         raise FileNotFoundError("missing")

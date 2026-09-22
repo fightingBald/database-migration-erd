@@ -41,7 +41,8 @@ def render_optimized(
     """The caller writes the baseline source first, retaining it on render failure.
 
     Source-only generation stays pure. SVG generation may select a simpler D2
-    hierarchy; the selected source always accompanies its unmodified native SVG.
+    hierarchy; the selected source accompanies the native table/FK layout with
+    index captions aligned by the renderer.
     """
     source, output = Path(source_path).resolve(), Path(output_path).resolve()
     if source == output or output.suffix.lower() != ".svg":

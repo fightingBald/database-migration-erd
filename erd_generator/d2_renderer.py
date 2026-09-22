@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .d2_engines import engine_flags, validate_layout_engine
+from .d2_index_svg import align_index_captions
 
 D2_VERSION = "0.7.1"
 LOGGER = logging.getLogger(__name__)
@@ -142,6 +143,15 @@ def render_d2(
             raise D2RenderError(
                 "D2 SVG verification failed: output is not an SVG document"
             )
+        try:
+            svg = temporary.read_text(encoding="utf-8")
+            aligned = align_index_captions(svg)
+        except ValueError as exc:
+            raise D2RenderError(
+                "D2 SVG verification failed: index footer alignment"
+            ) from exc
+        if aligned != svg:
+            temporary.write_text(aligned, encoding="utf-8")
         temporary.replace(output)
     except OSError as exc:
         raise D2RenderError(
