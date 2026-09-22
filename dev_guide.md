@@ -107,7 +107,7 @@ Small ordering problems use exhaustive search (up to 7 ranks); larger ones use a
 
 Selection uses verified native SVG geometry: FK-weighted mean Manhattan distance between group centres must fall by at least 5%. Canvas area, longest canvas side, total route length and longest route cannot increase; aspect ratio stays within the previous ratio or 2. The crossing proxy allows at most 5% more crossings (2 on small diagrams). Both candidates are compared with the same baseline. A failed or worse candidate keeps the previous winner; unverifiable baseline geometry skips refinement. Appendices and partial previews use one pass.
 
-Successful output includes matching D2 source and unchanged native SVG. Source-only generation writes the initial layout. Regenerate diagrams after upgrading; `--grouping none` disables automatic refinement while retaining explicit groups. Reverting the tool revision restores the previous automatic layout. Generated object paths may change with container placement.
+Successful output includes D2 source and SVG with native table and FK geometry. Index captions receive the alignment adjustment described below. Source-only generation writes the initial layout. Regenerate diagrams after upgrading; `--grouping none` disables automatic refinement while retaining explicit groups. Reverting the tool revision restores the previous automatic layout. Generated object paths may change with container placement.
 
 ## SQL support and diagnostics
 
@@ -136,7 +136,9 @@ Python callers applying separate SQL chunks must share a `SQLParseContext` throu
 
 Errors produce an **INCOMPLETE** preview when drawable tables remain, with exit code **1** and the requested outputs unchanged. Invalid tables and unresolved relationships are omitted and reported in `parse_log/`; a file with unclosed quotes or block boundaries is skipped. Previews use one pass of the selected engine without layout overrides. Source-only requests create only `.partial.d2`. Each run clears the previous `.partial` pair, so stale previews are not reused. Known skipped commands are summarized in the log.
 
-Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Index names, columns/expressions, methods and conditions appear below their table in small, left-aligned text, with long text wrapped. These native D2 Markdown labels use SVG `foreignObject`; view in a browser, since some SVG-to-image converters omit them. `--hide-indexes` restores the compact display. Full metadata remains in tooltips; `--force-appendix` also lists it in a diagram-wide appendix.
+Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Index details appear below each table in small, left-aligned text. Names stay intact; definitions wrap according to table width. Long names may widen a table. Full metadata remains in tooltips; `--hide-indexes` hides captions and `--force-appendix` also lists metadata in an appendix.
+
+D2 reserves caption space before layout. After rendering, the tool aligns only each caption's x coordinate with its actual table, checking that it fits inside the reserved space. This handles engine padding and self loops without changing table or FK coordinates. Running D2 directly on the source skips this alignment. Captions use SVG `foreignObject`; view in a browser, since some image converters omit them. Regenerate existing SVGs to apply the fix; reverting the tool revision restores the previous caption format.
 
 Regenerate existing diagrams to show index details. Indexed tables now have a containing D2 node, so scripts using generated object paths must account for the `_erd_table` child. Python callers can restore the previous structure with `show_indexes=False` in `build_d2()` and `render_optimized()`.
 
@@ -194,8 +196,8 @@ SQL + optional FK YAML → Schema → D2 source → D2 (ELK or TALA) → SVG
 | CLI and orchestration | [cli.py](erd_generator/cli.py) |
 | SQL loading and diagnostics | [sql_parser.py](erd_generator/sql_parser.py), `migrations.py`, `sql_statements.py`, `postgres_commands.py`, `postgres_exclusions.py`, `postgres_do.py`, `diagnostics.py` |
 | Schema, preview filtering and configuration | [schema.py](erd_generator/schema.py), `validation.py`, `fk_config.py`, `layout_config.py` |
-| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_affinity.py`, `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_emit.py`, `d2_indexes.py`, `d2_references.py`, `d2_styles.py` |
-| Rendering and layout comparison | [d2_renderer.py](erd_generator/d2_renderer.py), `d2_refinement.py`, `d2_geometry.py` |
+| Pure layout and D2 generation | [d2.py](erd_generator/d2.py), `d2_affinity.py`, `d2_business.py`, `d2_grouping.py`, `d2_layout.py`, `d2_dimensions.py`, `d2_emit.py`, `d2_indexes.py`, `d2_references.py`, `d2_styles.py` |
+| Rendering and layout comparison | [d2_renderer.py](erd_generator/d2_renderer.py), `d2_index_svg.py`, `d2_refinement.py`, `d2_geometry.py` |
 | Engine choices and render flags | [d2_engines.py](erd_generator/d2_engines.py) |
 | Atomic source publication | [artifacts.py](erd_generator/artifacts.py) |
 

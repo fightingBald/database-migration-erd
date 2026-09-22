@@ -266,7 +266,7 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
     for name, table in schema.items():
         if not show_indexes or not table.indexes:
             continue
-        expected_text = "".join(index_footer(table).splitlines())
+        expected_text = "".join(index_footer(table, show_types).splitlines())
         matches = [
             (box.width * box.height, i)
             for i, (label, box, _) in enumerate(regions)
@@ -283,8 +283,11 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
         if (
             content is None
             or content.get("style") != FOOTER_STYLE
+            or content.get("data-erd-index-table") != name
             or not (
                 label_box.y >= boxes[name].y + boxes[name].height
+                and abs(label_box.x - boxes[name].x) <= 0.01
+                and label_box.width <= boxes[name].width + 1
                 and footprint.contains(label_box)
             )
         ):

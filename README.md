@@ -10,7 +10,7 @@ Entirely fictional library schema, generated with default settings. Click to enl
 
 ## Features
 
-- Show tables, columns, data types, keys and relationships, with index details below each table.
+- Show tables, columns, data types, keys and relationships, with readable, left-aligned index details below each table.
 - Support composite foreign keys, self references and extra relationships supplied in YAML.
 - Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
 - Read forward migrations: sql-migrate/goose Up sections and `.up.sql` files; skip rollback SQL.

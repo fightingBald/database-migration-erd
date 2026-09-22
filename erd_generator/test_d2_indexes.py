@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 
 from erd_generator.d2 import build_d2
-from erd_generator.d2_indexes import FOOTER_LINE_WIDTH, footer_markup, index_footer
+from erd_generator.d2_indexes import footer_markup, index_footer
 from erd_generator.d2_layout import Component, estimate_size
 from erd_generator.schema import Column, ForeignKey, Index, Table
 
@@ -70,10 +70,25 @@ def test_wrapping_preserves_long_identifiers_expressions_and_literal_whitespace(
     predicate = "title <> 'two  spaces < value'"
     table = Table("books", indexes=[Index(name, (expression,), where=predicate)])
     footer = index_footer(table)
-    assert max(map(len, footer.splitlines())) <= FOOTER_LINE_WIDTH
+    assert any(f"INDEX {name}" in line for line in footer.splitlines())
     assert (
         "".join(footer.splitlines()) == f"INDEX {name} ({expression}) WHERE {predicate}"
     )
+
+
+def test_index_wrapping_uses_table_width_and_keeps_each_name_intact():
+    name = "idx_library_invitation_permissions_member_id"
+    index = Index(name, ("member_id", "created_at DESC"))
+    narrow = Table("links", columns=[Column("id")], indexes=[index])
+    wide = Table(
+        "demo_library.invitation_permissions_archive",
+        columns=[Column("external_identity_provider_reference", "TIMESTAMPTZ")],
+        indexes=[index],
+    )
+    for table in (narrow, wide):
+        lines = index_footer(table).splitlines()
+        assert any(f"INDEX {name}" in line for line in lines)
+    assert len(index_footer(wide).splitlines()) < len(index_footer(narrow).splitlines())
 
 
 @pytest.mark.parametrize("field", ["name", "where"])

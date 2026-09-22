@@ -1,4 +1,5 @@
 import itertools
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -10,7 +11,7 @@ import pytest
 from erd_generator.d2 import build_d2
 from erd_generator.d2_geometry import measure_layout
 from erd_generator.d2_indexes import index_footer
-from erd_generator.d2_renderer import D2RenderError, render_d2
+from erd_generator.d2_renderer import D2RenderConfig, D2RenderError, render_d2
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Index, Table
 from erd_generator.sql_parser import load_schema_result
@@ -24,6 +25,52 @@ def visible_text(root):
     nodes = list(root.iter(NS + "text"))
     nodes += root.findall(f".//{HTML_NS}span[@data-erd-index-line='true']")
     return "".join("".join(node.itertext()) for node in nodes)
+
+
+@pytest.mark.parametrize(
+    "engine", ["elk", pytest.param("tala", marks=pytest.mark.tala)]
+)
+@pytest.mark.parametrize("direction", ["right", "left", "up", "down"])
+def test_index_captions_follow_actual_table_left_edges(tmp_path, engine, direction):
+    if engine == "tala" and shutil.which("d2plugin-tala") is None:
+        pytest.skip("Optional d2plugin-tala executable is not on PATH")
+    schema = {}
+    for name, index_name in (
+        ("nodes", "idx_library_invitation_permissions_member_id"),
+        ("demo_library.invitation_archive", "ix_created"),
+        ('quoted."档案"', "idx_" + "W" * 55),
+    ):
+        schema[name] = Table(
+            name,
+            columns=[Column("id", "UUID"), Column("parent_id", "UUID")],
+            primary_key={"id"},
+            foreign_keys=[ForeignKey(("parent_id",), name, ("id",))],
+            indexes=[Index(index_name, ("parent_id",))],
+        )
+    source = tmp_path / "captions.d2"
+    source.write_text(
+        build_d2(schema, show_types=True, direction=direction, layout_engine=engine)
+    )
+    output = source.with_suffix(".svg")
+    render_d2(source, output, D2RenderConfig(layout_engine=engine))
+    measure_layout(output, schema, show_types=True)
+    root = ET.parse(output).getroot()
+    headers = {
+        group.find(NS + "text").text: group.find(f"{NS}rect[@class='class_header']")
+        for group in root.iter(NS + "g")
+        if group.find(f"{NS}rect[@class='class_header']") is not None
+    }
+    for table in schema.values():
+        footer = next(
+            label
+            for label in root.iter(NS + "foreignObject")
+            if table.indexes[0].name in "".join(label.itertext())
+        )
+        lines = footer.findall(f".//{HTML_NS}span[@data-erd-index-line='true']")
+        assert any(table.indexes[0].name in "".join(line.itertext()) for line in lines)
+        header = headers[table.name]
+        assert float(footer.get("x")) == pytest.approx(float(header.get("x")), abs=0.01)
+        assert float(footer.get("width")) <= float(header.get("width"))
 
 
 @pytest.mark.parametrize("hidden", [False, True])
@@ -143,12 +190,19 @@ def test_long_quoted_index_footer_self_loop_and_corrupt_footer_detection(tmp_pat
     )
     spans = footer.findall(f".//{HTML_NS}span[@data-erd-index-line='true']")
     assert "".join("".join(s.itertext()) for s in spans) == "".join(
-        index_footer(table).splitlines()
+        index_footer(table, show_types=True).splitlines()
     )
-    assert len(spans) > 2
+    assert len(spans) >= 2
     original = output.read_bytes()
     # Actual SVG edits here are deliberately invalid test inputs, never output fixes.
     footer.set("y", "0")
+    tree.write(output)
+    with pytest.raises(D2RenderError, match="index footer"):
+        measure_layout(output, schema, show_types=True)
+    output.write_bytes(original)
+    tree = ET.parse(output)
+    footer = tree.find(f".//{NS}foreignObject")
+    footer.set("x", str(float(footer.get("x")) - 11))
     tree.write(output)
     with pytest.raises(D2RenderError, match="index footer"):
         measure_layout(output, schema, show_types=True)
