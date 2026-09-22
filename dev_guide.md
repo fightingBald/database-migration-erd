@@ -15,18 +15,24 @@ PYTHONPATH=./tools/erd-generator \
   --log-dir ./tools/erd-generator
 ```
 
-Replace the SQL and output paths, and propagate a nonzero exit code. Rendering requires **D2 0.7.1**; bundled ELK is the default. `.d2` output alone needs no D2 executable.
+Replace the SQL and output paths, and propagate a nonzero exit code. Rendering requires **D2 0.7.1**; bundled ELK is the default. The command publishes only the SVG.
 
 Keep the tool's `.gitignore`; its rooted rules apply inside `tools/erd-generator/`, so they do not ignore the parent project's migrations. Add outputs outside that directory to the **parent project's** `.gitignore`:
 
 ```gitignore
 /docs-site/static/img/schema.svg
-/docs-site/static/img/schema.d2
 /docs-site/static/img/schema.partial.svg
-/docs-site/static/img/schema.partial.d2
 ```
 
 For already tracked outputs, use `git rm --cached -- <generated-path>` to untrack them while keeping local files.
+
+## Explicit D2 source export
+
+SVG requests use temporary D2 source, cleaned up on success or failure. Existing same-stem `.d2` files are left in place. To retain source, explicitly request a `.d2` output:
+
+`python -m erd_generator ./migrations ./generated/schema.d2`
+
+This needs no D2 executable. Add `--render svg` to that command if you explicitly want both files. Regenerate source when SQL changes; ordinary SVG generation will not update it. Scripts that previously consumed the automatic `.d2` file must request it explicitly; reverting this change restores the former output policy.
 
 ## Optional TALA layout
 
@@ -59,7 +65,7 @@ In a Docusaurus Markdown page, reference the generated file under `docs-site/sta
 [Open the full-size diagram](/img/schema.svg)
 ```
 
-Treat `.svg` and `.d2` as build outputs; CI does not need to commit them. Propagate codegen's exit code and stop the documentation build on failure. Partial previews and `parse_log/` can be retained as diagnostic artifacts, never as the published diagram. If generation and deployment are separate jobs, pass artifacts from the same run and require generation to succeed. Verify the image under the site's configured `baseUrl` before publishing.
+Treat the SVG as a build output; CI does not need to commit it. Propagate codegen's exit code and stop the documentation build on failure. Partial previews and `parse_log/` can be retained as diagnostic artifacts, never as the published diagram. If generation and deployment are separate jobs, pass artifacts from the same run and require generation to succeed. Verify the image under the site's configured `baseUrl` before publishing.
 
 ## Relationships without database FK constraints
 
@@ -107,7 +113,7 @@ Small ordering problems use exhaustive search (up to 7 ranks); larger ones use a
 
 Selection uses verified native SVG geometry: FK-weighted mean Manhattan distance between group centres must fall by at least 5%. Canvas area, longest canvas side, total route length and longest route cannot increase; aspect ratio stays within the previous ratio or 2. The crossing proxy allows at most 5% more crossings (2 on small diagrams). Both candidates are compared with the same baseline. A failed or worse candidate keeps the previous winner; unverifiable baseline geometry skips refinement. Appendices and partial previews use one pass.
 
-Successful output includes D2 source and SVG with native table and FK geometry. Index captions receive the alignment adjustment described below. Source-only generation writes the initial layout. Regenerate diagrams after upgrading; `--grouping none` disables automatic refinement while retaining explicit groups. Reverting the tool revision restores the previous automatic layout. Generated object paths may change with container placement.
+SVG output preserves native table and FK geometry, with the index-caption adjustment described below. Explicit source-only generation writes the initial layout; an explicit `.d2 --render svg` request retains the selected layout's source. Regenerate diagrams after upgrading; `--grouping none` disables automatic refinement while retaining explicit groups. Reverting the tool revision restores the previous automatic layout. Generated object paths may change with container placement.
 
 ## SQL support and diagnostics
 
@@ -134,7 +140,7 @@ View queries/dependencies, routine/extension side effects, enums, partitioning a
 
 Python callers applying separate SQL chunks must share a `SQLParseContext` through `parse_schema_from_sql(..., context=...)`; `load_schema_result()` manages this automatically. Regenerate diagrams after upgrading; rolling back the tool revision restores the previous rejection policy.
 
-Errors produce an **INCOMPLETE** preview when drawable tables remain, with exit code **1** and the requested outputs unchanged. Invalid tables and unresolved relationships are omitted and reported in `parse_log/`; a file with unclosed quotes or block boundaries is skipped. Previews use one pass of the selected engine without layout overrides. Source-only requests create only `.partial.d2`. Each run clears the previous `.partial` pair, so stale previews are not reused. Known skipped commands are summarized in the log.
+Errors produce an **INCOMPLETE** preview when drawable tables remain, with exit code **1** and the requested outputs unchanged. Invalid tables and unresolved relationships are omitted and reported in `parse_log/`; a file with unclosed quotes or block boundaries is skipped. SVG requests create only `.partial.svg`; `.partial.d2` is retained only for explicit D2 requests. Previews use one pass of the selected engine without layout overrides. Each run clears the previous `.partial` pair, so stale previews are not reused. Known skipped commands are summarized in the log.
 
 Tables show PK/FK markers and UNQ for unconditional single-column unique constraints/indexes. Index details appear below each table in small, left-aligned text. Names stay intact; definitions wrap according to table width. Long names may widen a table. Full metadata remains in tooltips; `--hide-indexes` hides captions and `--force-appendix` also lists metadata in an appendix.
 
@@ -148,10 +154,10 @@ Regenerate existing diagrams to show index details. Indexed tables now have a co
 | Layout configuration error | Fix the reported configuration before regenerating the formal diagram. |
 | D2 missing or wrong version | Install exactly 0.7.1, check `d2 --version`, or set `--d2-binary`. |
 | TALA unavailable | Put `d2plugin-tala` on PATH and check `d2 layout tala`; see [setup](#optional-tala-layout). |
-| Rendering failure | The new D2 source is retained and the previous SVG is unchanged. Fix the error and rerun. |
+| Rendering failure | The previous SVG is unchanged and temporary source is removed. Request `.d2` output explicitly if you need source for diagnosis. |
 | Timeout | Inspect diagram size and increase `--render-timeout` if needed. |
 
-Exit codes: **0** success, **1** generation/rendering failure, **2** invalid options. Source and SVG replacement are separate operations, so automation must check the exit code. Processing runs locally; no SQL or diagram is uploaded.
+Exit codes: **0** success, **1** generation/rendering failure, **2** invalid options. SVG publication is atomic. When both outputs are explicitly requested, source and SVG replacement are separate operations; automation must check the exit code. Processing runs locally; no SQL or diagram is uploaded.
 
 ## Additional CLI options
 

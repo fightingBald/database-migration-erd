@@ -90,14 +90,24 @@ def test_cli_index_visibility_and_source_only_output(tmp_path, hidden):
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    source = output.with_suffix(".d2").read_text()
-    assert ("label.near: bottom-left" in source) is not hidden
-    assert "Index ix_title" in source
+    assert set(tmp_path.iterdir()) == {migrations, output}
     visible = visible_text(ET.parse(output).getroot())
     assert ("INDEX ix_title" in visible) is not hidden
     schema = load_schema_result(str(migrations)).schema
     measure_layout(output, schema, show_types=True, show_indexes=not hidden)
-    # Source-only output has the same table/metadata structure without rendering.
+    # D2 source is available only when it is explicitly requested.
+    arguments[1] = str(output.with_suffix(".d2"))
+    result = subprocess.run(
+        [sys.executable, "-m", "erd_generator", *arguments],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    source = output.with_suffix(".d2").read_text()
+    assert ("label.near: bottom-left" in source) is not hidden
+    assert "Index ix_title" in source
     assert source == build_d2(schema, show_types=True, show_indexes=not hidden)
 
 

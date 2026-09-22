@@ -54,7 +54,7 @@ def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
         )
     except FileNotFoundError as exc:
         raise D2RenderError(
-            f"D2 executable not found: {config.executable}; install D2 {D2_VERSION} or generate source without --render"
+            f"D2 executable not found: {config.executable}; install D2 {D2_VERSION} or request .d2 output"
         ) from exc
     except subprocess.TimeoutExpired as exc:
         raise D2RenderError(
@@ -71,7 +71,7 @@ def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
             f" at line {positions[0][0]}, column {positions[0][1]}" if positions else ""
         )
         raise D2RenderError(
-            f"D2 {stage} failed with exit {exc.returncode}{location} (required version {D2_VERSION}); inspect the retained .d2 source"
+            f"D2 {stage} failed with exit {exc.returncode}{location} (required version {D2_VERSION}); request .d2 output to inspect the source"
         ) from exc
     except OSError as exc:
         raise D2RenderError(

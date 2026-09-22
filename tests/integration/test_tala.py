@@ -141,7 +141,9 @@ def test_cli_partial_preview_uses_tala_and_preserves_formal_outputs(tmp_path):
     assert result.returncode == 1, result.stderr
     assert source.read_text() == "old source" and image.read_text() == "old image"
     partial = tmp_path / "schema.partial.svg"
-    assert "layout-engine: tala" in partial.with_suffix(".d2").read_text()
+    assert "layout=tala" in result.stderr
+    assert not partial.with_suffix(".d2").exists()
+    assert not list(tmp_path.glob(".erd-*"))
     root = ET.parse(partial).getroot()
     assert any(
         "INCOMPLETE" in "".join(e.itertext())
