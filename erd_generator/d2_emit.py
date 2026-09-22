@@ -36,7 +36,7 @@ def incomplete_notice(schema: Schema, diagnostic_count: int) -> str:
         key += "_"
     label = (
         "INCOMPLETE\nStructure not fully verified\n"
-        f"{diagnostic_count} diagnostics; see parse_log/"
+        f"{diagnostic_count} diagnostics; see command output"
     )
     return "\n".join(
         [

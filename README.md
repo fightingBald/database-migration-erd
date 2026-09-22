@@ -1,25 +1,21 @@
 # Database ER Diagram Generator
 
-Turn PostgreSQL migration SQL into ER diagrams with **D2**. No database connection needed.
-
-Outputs are `.svg` images. **ELK** is the default layout engine; **TALA** is optional.
+Turn PostgreSQL migration SQL into **SVG ER diagrams**, without a database connection. Uses **D2 + ELK**; **TALA** is optional.
 
 [![Fictional library ER diagram with 16 tables in four automatic groups](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)
 
-Entirely fictional library schema, generated with default settings. Click to enlarge or [download the SVG](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.svg).
+Fictional library schema, generated with default settings. [Download the SVG](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.svg).
 
 ## Features
 
-- Show tables, columns, data types, keys and relationships, with readable, left-aligned index details below each table.
-- Support composite foreign keys, self references and extra relationships supplied in YAML.
-- Read dollar-quoted SQL, static `DO` blocks and common role/permission setup blocks.
-- Read forward migrations: sql-migrate/goose Up sections and `.up.sql` files; skip rollback SQL.
-- Skip views, routine definitions, top-level procedure calls and extension setup; reject indexes targeting unknown tables.
-- Infer business groups with matching colours; bring strongly related groups closer when a rendered candidate improves layout quality.
+- Tables, columns, types, keys and index details below each table.
+- Composite foreign keys, self references and additional relationships from YAML.
+- Automatic grouping, colours and compact layouts.
+- Forward PostgreSQL migrations, including supported dollar-quoted `DO` blocks.
 
 ## Install
 
-Requires **Python 3.11+**. To generate SVG images, install [D2 0.7.1](https://github.com/d2lang/d2/releases/tag/v0.7.1) and make sure `d2` is on your PATH.
+Requires **Python 3.11+** and [D2 0.7.1](https://github.com/d2lang/d2/releases/tag/v0.7.1) on PATH.
 
 From the project directory:
 
@@ -31,32 +27,21 @@ python -m pip install -r requirements.txt
 
 ## Usage
 
-Pass your **SQL directory** followed by the **output file**:
+Pass the **migration directory** and **output SVG**:
 
 ```bash
 python -m erd_generator ./migrations ./generated/schema.svg
 ```
 
-Replace `./migrations` with your SQL directory. The command creates only `schema.svg` in `./generated/`. Open it in a browser. Supply the migrations needed to build your schema.
+Supply the migrations needed to build your schema. The command creates only `schema.svg`; open it in a browser. Grouping, colours and column types are enabled automatically.
 
-On SQL/schema errors, the command returns **1** and preserves the existing SVG. When possible, it writes `schema.partial.svg` with a visible **INCOMPLETE** notice; details are in `parse_log/`. Fix the errors and rerun before publishing.
-
-The default uses clean styling, automatic business grouping, compact placement and visible column types. No grouping configuration is required. Add options after the two paths when needed:
+Errors appear in the terminal; no log files are written by default. On SQL/schema errors, the command exits **1**, preserves the existing SVG and, when possible, writes an **INCOMPLETE** `schema.partial.svg` for diagnosis.
 
 | Option | Purpose |
 | --- | --- |
-| `--layout tala` | Use TALA; see [plugin setup and licensing](dev_guide.md#optional-tala-layout). |
-| `--fk-config file.yaml` | Add relationships; see the [YAML format](dev_guide.md#relationships-without-database-fk-constraints). |
-| `--layout-config file.yaml` | Override group membership, titles or colours; see [business layout](dev_guide.md#business-layout). |
-| `--show-references` | Show cross-group target tables and keys beside FK fields, e.g. `FK → books.id`; makes tables wider. |
-| `--direction down` | Lay out related tables from top to bottom. |
-| `--grouping none` | Disable automatic grouping and layout refinement. |
-| `--hide-types` | Hide column data types. |
-| `--hide-indexes` | Hide index details below tables; retain tooltip notes. |
-| `--style classic` | Use the original visual style. |
+| `--fk-config file.yaml` | [Add relationships](dev_guide.md#relationships-without-database-fk-constraints). |
+| `--layout-config file.yaml` | [Set groups, titles and colours](dev_guide.md#business-layout). |
+| `--layout tala` | [Use TALA](dev_guide.md#optional-tala-layout). |
+| `--show-references` | Label cross-group FK targets beside fields. |
 
-Supports common PostgreSQL schema migrations. See the [developer guide](dev_guide.md) for supported SQL, explicit D2 source export, troubleshooting and development.
-
-To regenerate diagrams in CI and display them in Docusaurus, see [CI integration](dev_guide.md#ci-and-docusaurus).
-
-To include the tool under `tools/erd-generator/` in an existing project, see [codegen integration](dev_guide.md#use-inside-an-existing-project).
+Run `python -m erd_generator --help` for all options. See the [developer guide](dev_guide.md) for codegen/CI integration, SQL support and development.

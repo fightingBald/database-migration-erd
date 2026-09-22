@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,6 +26,50 @@ def run(migrations, output, root, *options):
         text=True,
         timeout=30,
     )
+
+
+@pytest.mark.parametrize("diagnostic", ["sql", "fk"])
+@pytest.mark.parametrize("existing_logs", [False, True])
+def test_default_diagnostics_only_use_stderr(
+    tmp_path, monkeypatch, capsys, diagnostic, existing_logs
+):
+    from erd_generator.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    sql = "CREATE TABLE books(id int); CREATE TABLE loans(book_id int);"
+    output = tmp_path / "schema.d2"
+    output.write_text("old source")
+    arguments = [str(migrations), str(output)]
+    if diagnostic == "sql":
+        sql += "CREATE INDEX ix ON missing(id);"
+        expected = "unknown table 'missing'"
+    else:
+        config = tmp_path / "fk.yaml"
+        config.write_text("loans: {fks: [[book_id, books, missing_id]]}")
+        arguments += ["--fk-config", str(config)]
+        expected = "unknown or ambiguous column 'books.missing_id'"
+    (migrations / "V1.sql").write_text(sql)
+    log_dir = tmp_path / "parse_log"
+    previous = log_dir / "previous.log"
+    if existing_logs:
+        log_dir.mkdir()
+        previous.write_text("previous diagnostic")
+
+    assert main(arguments) == 1
+    captured = capsys.readouterr()
+    assert expected in captured.err
+    assert "Parse diagnostics written" not in captured.err
+    assert output.read_text() == "old source"
+    if existing_logs:
+        assert list(log_dir.iterdir()) == [previous]
+        assert previous.read_text() == "previous diagnostic"
+    else:
+        assert not log_dir.exists()
+    partial = (tmp_path / "schema.partial.d2").read_text()
+    assert "INCOMPLETE" in partial and "command output" in partial
+    assert "parse_log/" not in partial
 
 
 def test_error_writes_marked_preview_then_success_cleans_it(tmp_path):
@@ -135,7 +181,10 @@ def test_partial_preview_reports_omitted_layout_overrides(tmp_path):
     assert "Layout overrides omitted" in log and "unknown table 'missing'" in log
 
 
-def test_copied_runtime_runs_directly_from_company_codegen_directory(tmp_path):
+@pytest.mark.parametrize("save_logs", [False, True])
+def test_copied_runtime_runs_directly_from_company_codegen_directory(
+    tmp_path, save_logs
+):
     tool = tmp_path / "tools" / "erd-generator"
     shutil.copytree(
         ROOT / "erd_generator",
@@ -147,6 +196,7 @@ def test_copied_runtime_runs_directly_from_company_codegen_directory(tmp_path):
     (migrations / "V1.sql").write_text(
         "CREATE TABLE books(id int); CREATE INDEX ix ON typo(id);"
     )
+    options = ["--log-dir", "./tools/erd-generator"] if save_logs else []
     result = subprocess.run(
         [
             sys.executable,
@@ -154,8 +204,7 @@ def test_copied_runtime_runs_directly_from_company_codegen_directory(tmp_path):
             "erd_generator",
             "./db/migrations",
             "./generated/schema.d2",
-            "--log-dir",
-            "./tools/erd-generator",
+            *options,
         ],
         cwd=tmp_path,
         env=dict(os.environ, PYTHONPATH=str(tool)),
@@ -166,5 +215,11 @@ def test_copied_runtime_runs_directly_from_company_codegen_directory(tmp_path):
     assert result.returncode == 1
     assert (tmp_path / "generated/schema.partial.d2").is_file()
     assert not (tmp_path / "generated/schema.d2").exists()
-    assert len(list((tool / "parse_log").glob("*.log"))) == 1
+    assert "unknown table 'typo'" in result.stderr
+    if save_logs:
+        logs = list((tool / "parse_log").glob("*.log"))
+        assert len(logs) == 1
+        assert "unknown table 'typo'" in logs[0].read_text()
+    else:
+        assert not (tool / "parse_log").exists()
     assert not (tmp_path / "parse_log").exists()
