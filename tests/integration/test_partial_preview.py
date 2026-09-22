@@ -2,16 +2,15 @@ import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
 
 from erd_generator.d2_geometry import measure_layout
 from erd_generator.sql_parser import load_schema_result
 from erd_generator.validation import preview_schema
+from tests.support import ROOT
 
 pytestmark = pytest.mark.integration
-ROOT = Path(__file__).resolve().parents[2]
 NS = "{http://www.w3.org/2000/svg}"
 
 

@@ -4,7 +4,6 @@ import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
 
@@ -15,9 +14,9 @@ from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Table
 from erd_generator.sql_parser import load_schema_result, parse_schema_from_sql
 from erd_generator.validation import preview_schema
+from tests.support import ROOT
 
 pytestmark = [pytest.mark.integration, pytest.mark.tala]
-ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(autouse=True)

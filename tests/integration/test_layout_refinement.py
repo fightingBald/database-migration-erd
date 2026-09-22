@@ -8,13 +8,13 @@ from erd_generator import d2_refinement
 from erd_generator.d2 import build_d2
 from erd_generator.d2_geometry import improves_affinity, improves_layout, measure_layout
 from erd_generator.d2_renderer import render_d2
-from tests.integration.test_business_layout import assert_named_regions, business_schema
-from tests.integration.test_compact_layout import (
+from tests.support.schemas import business_schema, scenario
+from tests.support.svg import (
     assert_fk_arrows,
+    assert_named_regions,
     assert_no_overlaps,
     table_boxes,
 )
-from tests.integration.test_render_spacing import scenario
 
 pytestmark = pytest.mark.integration
 

@@ -4,7 +4,6 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from copy import deepcopy
-from pathlib import Path
 
 import pytest
 
@@ -15,6 +14,7 @@ from erd_generator.d2_renderer import D2RenderConfig, D2RenderError, render_d2
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Index, Table
 from erd_generator.sql_parser import load_schema_result
+from tests.support import ROOT
 
 pytestmark = pytest.mark.integration
 NS = "{http://www.w3.org/2000/svg}"
@@ -84,7 +84,7 @@ def test_cli_index_visibility_and_source_only_output(tmp_path, hidden):
     arguments = [str(migrations), str(output), *(["--hide-indexes"] if hidden else [])]
     result = subprocess.run(
         [sys.executable, "-m", "erd_generator", *arguments],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=30,
@@ -99,7 +99,7 @@ def test_cli_index_visibility_and_source_only_output(tmp_path, hidden):
     arguments[1] = str(output.with_suffix(".d2"))
     result = subprocess.run(
         [sys.executable, "-m", "erd_generator", *arguments],
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=ROOT,
         capture_output=True,
         text=True,
         timeout=30,

@@ -2,17 +2,17 @@ import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
 
 from erd_generator.d2 import build_d2
+from erd_generator.d2_geometry import measure_layout
 from erd_generator.d2_renderer import D2_VERSION, D2RenderConfig, render_d2
 from erd_generator.schema import Column, ForeignKey, Table
-from erd_generator.sql_parser import parse_schema_from_sql
+from erd_generator.sql_parser import load_schema_result, parse_schema_from_sql
+from tests.support import ROOT
 
 pytestmark = pytest.mark.integration
-ROOT = Path(__file__).resolve().parents[2]
 NS = "{http://www.w3.org/2000/svg}"
 
 
@@ -209,12 +209,17 @@ def test_postgres_do_migration_renders_real_svg(tmp_path):
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    source = output.with_suffix(".d2").read_text()
-    assert '"app.child"."parent_id" -> "app.parent"."id"' in source
+    assert set(tmp_path.iterdir()) == {migrations, output}
+    schema = load_schema_result(str(migrations)).schema
+    assert set(schema) == {"app.parent", "app.child"}
+    assert schema["app.child"].foreign_keys == [
+        ForeignKey(("parent_id",), "app.parent", ("id",))
+    ]
+    measure_layout(output, schema, show_types=True)
     texts = {
         "".join(e.itertext()) for e in ET.parse(output).getroot().iter(NS + "text")
     }
-    assert {"app.parent", "app.child", "parent_id"}.issubset(texts)
+    assert {"app.parent", "app.child", "parent_id", "PK", "FK"}.issubset(texts)
     assert "layout=elk" in result.stderr
 
 
@@ -239,13 +244,23 @@ def test_library_role_migration_renders_real_svg(tmp_path):
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    source = output.with_suffix(".d2").read_text()
-    assert source.count("shape: sql_table") == 2
-    assert '"demo_library.loans"."member_id" -> "demo_library.members"."id"' in source
+    assert set(tmp_path.iterdir()) == {migrations, output}
+    schema = load_schema_result(str(migrations)).schema
+    assert set(schema) == {"demo_library.members", "demo_library.loans"}
+    assert schema["demo_library.loans"].foreign_keys == [
+        ForeignKey(("member_id",), "demo_library.members", ("id",))
+    ]
+    measure_layout(output, schema, show_types=True)
     texts = {
         "".join(element.itertext())
         for element in ET.parse(output).getroot().iter(NS + "text")
     }
-    assert {"demo_library.members", "demo_library.loans", "member_id"}.issubset(texts)
+    assert {
+        "demo_library.members",
+        "demo_library.loans",
+        "member_id",
+        "PK",
+        "FK",
+    }.issubset(texts)
     assert "demo_library_reader" not in texts
     assert "layout=elk" in result.stderr

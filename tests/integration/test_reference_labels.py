@@ -9,8 +9,8 @@ from erd_generator.d2_geometry import measure_layout
 from erd_generator.d2_renderer import render_d2
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Table
-from tests.integration.test_business_layout import assert_named_regions, business_schema
-from tests.integration.test_compact_layout import NS, assert_fk_arrows, table_boxes
+from tests.support.schemas import business_schema
+from tests.support.svg import NS, assert_fk_arrows, assert_named_regions, table_boxes
 
 pytestmark = pytest.mark.integration
 

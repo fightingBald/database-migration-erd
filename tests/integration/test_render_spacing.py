@@ -9,32 +9,15 @@ import pytest
 
 from erd_generator.d2 import build_d2
 from erd_generator.d2_renderer import render_d2
-from erd_generator.schema import ForeignKey
-from tests.integration.test_business_layout import business_schema
-from tests.integration.test_compact_layout import (
+from tests.support.schemas import scenario
+from tests.support.svg import (
     arrow_routes,
     assert_fk_arrows,
     assert_no_overlaps,
-    related_schema,
-    table,
     table_boxes,
 )
 
 pytestmark = pytest.mark.integration
-
-
-def scenario(shape):
-    if shape == "communities":
-        return related_schema()
-    if shape == "composite_cycles":
-        return business_schema()
-    names = tuple(f"demo_library.t{i:02}" for i in range(18))
-    schema = {n: table(n, 3 + i % 7) for i, n in enumerate(names)}
-    if shape != "isolated":
-        for i, name in enumerate(names[1:], 1):
-            target = names[0] if shape == "star" else names[i - 1]
-            schema[name].foreign_keys = [ForeignKey(("field_1",), target, ("id",))]
-    return schema
 
 
 @pytest.mark.parametrize(

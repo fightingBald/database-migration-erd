@@ -4,7 +4,7 @@ See the [README](README.md) for installation and basic usage; `python -m erd_gen
 
 ## Use inside an existing project
 
-Copy `erd_generator/`, `requirements.txt` and `.gitignore` into `tools/erd-generator/`. Exclude `.git/`, virtual environments, local SQL and generated files; `.gitignore` does not filter filesystem copies. Tests and development files are only needed when modifying the tool.
+Copy `erd_generator/`, `requirements.txt` and `.gitignore` into `tools/erd-generator/`. The Python package contains only runtime code. Exclude `tests/`, `.git/`, virtual environments, caches, local SQL and generated files; `.gitignore` does not filter filesystem copies.
 
 Follow the README installation steps inside that directory. From the parent project's existing codegen script:
 
@@ -115,6 +115,8 @@ On SQL/schema/FK errors, valid content may produce an **INCOMPLETE** `.partial.s
 Rendering failures also preserve the previous SVG. Check `d2 --version`, `--d2-binary PATH` or `--render-timeout SECONDS` as appropriate. Exit codes: **0** success, **1** generation failure, **2** invalid options. SVG publication is atomic; when both source and SVG are requested, their replacements are separate operations.
 
 ## Development
+
+All tests live under `tests/`: `unit/` for modules, `cli/` for command-line/codegen contracts, and `integration/` for real rendering. Shared helpers live in `support/`; SQL fixtures live in `fixtures/`. Test modules import shared helpers, never other test modules.
 
 ```bash
 python -m pip install -r requirements-dev.txt

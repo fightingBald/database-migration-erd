@@ -44,4 +44,4 @@ Errors appear in the terminal; no log files are written by default. On SQL/schem
 | `--layout tala` | [Use TALA](dev_guide.md#optional-tala-layout). |
 | `--show-references` | Label cross-group FK targets beside fields. |
 
-Run `python -m erd_generator --help` for all options. See the [developer guide](dev_guide.md) for codegen/CI integration, SQL support and development.
+Run `python -m erd_generator --help` for all options. See the [developer guide](dev_guide.md) to embed this tool under `tools/erd-generator/`, call it from codegen/CI, or work on the tool itself.
