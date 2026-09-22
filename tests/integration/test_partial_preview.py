@@ -63,6 +63,7 @@ def test_partial_svg_has_visible_notice_real_field_ports_and_no_formal_updates(
     schema, omissions = preview_schema(load_schema_result(str(migrations)).schema)
     assert len(schema) == 3 and len(omissions) == 1
     measure_layout(partial, schema, show_types=True)
-    assert "rolled_back" not in partial.with_suffix(".d2").read_text()
-    assert "_erd_partial_notice_:" in partial.with_suffix(".d2").read_text()
+    assert not partial.with_suffix(".d2").exists()
+    assert not list(tmp_path.glob(".erd-*"))
+    assert "rolled_back" not in "".join(root.itertext())
     assert "Relationship omitted" in result.stderr and "Unsupported DO" in result.stderr

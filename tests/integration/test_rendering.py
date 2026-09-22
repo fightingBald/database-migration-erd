@@ -112,13 +112,21 @@ def test_cli_uses_elk_even_if_environment_requests_dagre(tmp_path, syntax):
     assert result.returncode == 0, result.stderr
     assert "layout=elk" in result.stderr
     source = tmp_path / "schema.d2"
-    assert str(source) in result.stdout and str(output) in result.stdout
-    assert '"id": "BIGSERIAL" {constraint: primary_key}' in source.read_text()
-    assert set(tmp_path.iterdir()) == {source, output, migrations, config}
-    assert ("foreign_key" in source.read_text()) == (syntax != "positional")
+    assert str(output) in result.stdout
+    expected_files = {output, migrations, config}
+    if syntax == "named":
+        assert str(source) in result.stdout
+        assert '"id": "BIGSERIAL" {constraint: primary_key}' in source.read_text()
+        assert "foreign_key" in source.read_text()
+        expected_files.add(source)
+    else:
+        assert not source.exists()
+        assert ".d2" not in result.stdout
+    assert set(tmp_path.iterdir()) == expected_files
     root = ET.parse(output).getroot()
     texts = ["".join(e.itertext()) for e in root.iter(NS + "text")]
     assert "BIGSERIAL" in texts
+    assert ("FK" in texts) == (syntax != "positional")
     assert {"parent", "child", "parent_id"}.issubset(texts)
     assert "obsolete" not in texts
 

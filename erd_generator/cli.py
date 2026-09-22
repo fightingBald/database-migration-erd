@@ -1,12 +1,14 @@
-"""Load migration SQL, generate D2 source and optionally render an SVG."""
+"""Generate an SVG from migration SQL, or explicitly export D2 source."""
 
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from .artifacts import write_text_atomic as _write_source
 from .d2_engines import LAYOUT_ENGINES
@@ -30,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  %(prog)s ./migrations ./generated/schema.svg\n"
             "  %(prog)s ./migrations ./generated/schema.d2\n\n"
-            "SVG output also writes same-stem D2 source. D2 output alone does not\n"
+            "SVG output keeps only the image. Explicit D2 output does not\n"
             "require the D2 executable. Short-form defaults: types shown, clean\n"
             "style, ELK layout. Named paths: --migrations SQL_DIR --out OUTPUT."
         ),
@@ -45,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
         "output_path",
         nargs="?",
         metavar="OUTPUT",
-        help="Output .svg image (plus .d2 source), or .d2 source only",
+        help="Output .svg image, or explicitly export .d2 source",
     )
     parser.add_argument(
         "--migrations",
@@ -190,12 +192,9 @@ def run_cli(args: argparse.Namespace) -> int:
     incomplete = False
     try:
         output = Path(args.out).expanduser().resolve()
-        source_output = (
-            output.with_suffix(".d2") if output.suffix.lower() == ".svg" else output
-        )
-        svg_output = (
-            output if output.suffix.lower() == ".svg" else output.with_suffix(".svg")
-        )
+        svg_only = output.suffix.lower() == ".svg"
+        source_output = output.with_suffix(".d2") if svg_only else output
+        svg_output = output if svg_only else output.with_suffix(".svg")
         partial_source = source_output.with_suffix(".partial.d2")
         partial_svg = svg_output.with_suffix(".partial.svg")
         # A preview belongs to one attempt. Never leave an older preview looking
@@ -269,37 +268,46 @@ def run_cli(args: argparse.Namespace) -> int:
             len(layout_config.groups) if layout_config else 0,
             args.show_references,
         )
-        _write_source(source_output, source)
-        written_source = source_output
-        if args.render:
-            config = D2RenderConfig(
-                executable=args.d2_binary or "d2",
-                timeout=args.render_timeout if args.render_timeout is not None else 120,
-                force_appendix=args.force_appendix,
-                layout_engine=args.layout,
-            )
-            if incomplete:
-                from .d2_renderer import render_d2
-
-                # Keep the warning in the native source/SVG; previews use one
-                # rendering pass rather than regenerating layout candidates.
-                render_d2(source_output, svg_output, config)
-            else:
-                from .d2_refinement import render_optimized
-
-                render_optimized(
-                    schema,
-                    source_output,
-                    svg_output,
-                    config,
-                    show_types=args.show_types,
-                    direction=args.direction,
-                    style=args.style,
-                    grouping=args.grouping,
-                    layout_config=layout_config,
-                    show_references=args.show_references,
-                    show_indexes=args.show_indexes,
+        with ExitStack() as workspace:
+            if svg_only:
+                source_output.parent.mkdir(parents=True, exist_ok=True)
+                temporary = workspace.enter_context(
+                    TemporaryDirectory(prefix=".erd-source-", dir=source_output.parent)
                 )
+                source_output = Path(temporary) / source_output.name
+            _write_source(source_output, source)
+            if not svg_only:
+                written_source = source_output
+            if args.render:
+                config = D2RenderConfig(
+                    executable=args.d2_binary or "d2",
+                    timeout=args.render_timeout
+                    if args.render_timeout is not None
+                    else 120,
+                    force_appendix=args.force_appendix,
+                    layout_engine=args.layout,
+                )
+                if incomplete:
+                    from .d2_renderer import render_d2
+
+                    # Previews keep their warning and use one rendering pass.
+                    render_d2(source_output, svg_output, config)
+                else:
+                    from .d2_refinement import render_optimized
+
+                    render_optimized(
+                        schema,
+                        source_output,
+                        svg_output,
+                        config,
+                        show_types=args.show_types,
+                        direction=args.direction,
+                        style=args.style,
+                        grouping=args.grouping,
+                        layout_config=layout_config,
+                        show_references=args.show_references,
+                        show_indexes=args.show_indexes,
+                    )
         LOGGER.info(
             "ERD %s: tables=%d columns=%d foreign_keys=%d",
             "incomplete preview" if incomplete else "generated",
@@ -307,9 +315,10 @@ def run_cli(args: argparse.Namespace) -> int:
             sum(len(t.columns) for t in schema.values()),
             sum(len(t.foreign_keys) for t in schema.values()),
         )
-        print(
-            f"{'Partial D2 preview' if incomplete else 'Diagram'} written to {source_output}"
-        )
+        if written_source is not None:
+            print(
+                f"{'Partial D2 preview' if incomplete else 'Diagram'} written to {written_source}"
+            )
         if args.render:
             print(
                 f"{'Partial SVG preview' if incomplete else 'SVG'} written to {svg_output}"
@@ -330,6 +339,13 @@ def run_cli(args: argparse.Namespace) -> int:
                 f"Partial D2 source retained at {written_source}; no current partial SVG was generated."
                 if incomplete
                 else f"D2 source retained at {written_source}; SVG was not updated.",
+                file=sys.stderr,
+            )
+        elif args.render:
+            print(
+                "No current partial SVG was generated; requested outputs were not updated."
+                if incomplete
+                else "SVG was not updated.",
                 file=sys.stderr,
             )
         return 1

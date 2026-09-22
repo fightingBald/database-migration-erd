@@ -96,7 +96,7 @@ def test_invalid_foreign_keys_are_reported_and_omitted_from_preview(tmp_path):
     )
 
 
-def test_missing_renderer_retains_only_current_partial_source(tmp_path):
+def test_missing_renderer_leaves_no_temporary_or_partial_sources(tmp_path):
     migrations = tmp_path / "migrations"
     migrations.mkdir()
     (migrations / "V1.sql").write_text(
@@ -106,12 +106,15 @@ def test_missing_renderer_retains_only_current_partial_source(tmp_path):
     image.write_text("old image")
     source.write_text("old source")
     (tmp_path / "schema.partial.svg").write_text("stale preview")
+    (tmp_path / "schema.partial.d2").write_text("stale source preview")
     result = run(migrations, image, tmp_path, "--d2-binary", "/nonexistent/d2")
     assert result.returncode == 1
     assert image.read_text() == "old image" and source.read_text() == "old source"
-    assert "INCOMPLETE" in (tmp_path / "schema.partial.d2").read_text()
+    assert not (tmp_path / "schema.partial.d2").exists()
     assert not (tmp_path / "schema.partial.svg").exists()
+    assert not list(tmp_path.glob(".erd-*"))
     assert "D2 executable not found" in result.stderr
+    assert "source retained" not in result.stderr
 
 
 def test_partial_preview_reports_omitted_layout_overrides(tmp_path):

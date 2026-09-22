@@ -2,7 +2,7 @@
 
 Turn PostgreSQL migration SQL into ER diagrams with **D2**. No database connection needed.
 
-Outputs are `.d2` source and `.svg` images. **ELK** is the default layout engine; **TALA** is optional.
+Outputs are `.svg` images. **ELK** is the default layout engine; **TALA** is optional.
 
 [![Fictional library ER diagram with 16 tables in four automatic groups](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)](https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.1.0/dummy-library.png)
 
@@ -37,15 +37,9 @@ Pass your **SQL directory** followed by the **output file**:
 python -m erd_generator ./migrations ./generated/schema.svg
 ```
 
-Replace `./migrations` with your SQL directory. The command creates `schema.svg` plus `schema.d2` in `./generated/`. Open the SVG in a browser. Supply the migrations needed to build your schema.
+Replace `./migrations` with your SQL directory. The command creates only `schema.svg` in `./generated/`. Open it in a browser. Supply the migrations needed to build your schema.
 
-On SQL/schema errors, the command returns **1** and preserves the normal outputs. When possible, it writes `schema.partial.d2` and `schema.partial.svg` with a visible **INCOMPLETE** notice; details are in `parse_log/`. Fix the errors and rerun before publishing.
-
-To generate only D2 source, change the output extension. This does not require D2 to be installed:
-
-```bash
-python -m erd_generator ./migrations ./generated/schema.d2
-```
+On SQL/schema errors, the command returns **1** and preserves the existing SVG. When possible, it writes `schema.partial.svg` with a visible **INCOMPLETE** notice; details are in `parse_log/`. Fix the errors and rerun before publishing.
 
 The default uses clean styling, automatic business grouping, compact placement and visible column types. No grouping configuration is required. Add options after the two paths when needed:
 
@@ -61,7 +55,7 @@ The default uses clean styling, automatic business grouping, compact placement a
 | `--hide-indexes` | Hide index details below tables; retain tooltip notes. |
 | `--style classic` | Use the original visual style. |
 
-Supports common PostgreSQL schema migrations. See the [developer guide](dev_guide.md) for supported SQL, all options, troubleshooting and development.
+Supports common PostgreSQL schema migrations. See the [developer guide](dev_guide.md) for supported SQL, explicit D2 source export, troubleshooting and development.
 
 To regenerate diagrams in CI and display them in Docusaurus, see [CI integration](dev_guide.md#ci-and-docusaurus).
 

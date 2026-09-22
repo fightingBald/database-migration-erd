@@ -49,7 +49,7 @@ def input_args(tmp_path, suffix="d2", *, positional=False):
     ]
 
 
-def test_default_entrypoint_generates_d2_without_starting_renderer(tmp_path):
+def test_explicit_d2_output_does_not_start_renderer(tmp_path):
     result = cli(*input_args(tmp_path), "--d2-binary", "/nonexistent/d2")
     # A renderer-only flag must not be silently ignored in source-only mode.
     assert result.returncode == 2
@@ -165,19 +165,69 @@ def test_positional_output_rejects_unsupported_formats(
     assert not output.with_suffix(".d2").exists()
 
 
-def test_positional_svg_failure_retains_source_and_previous_image(
-    tmp_path, simple_migrations
+@pytest.mark.parametrize("existing_source", [False, True])
+def test_svg_failure_cleans_temporary_source_and_preserves_existing_files(
+    tmp_path, simple_migrations, existing_source
 ):
     output = tmp_path / "schema.svg"
     output.write_text("old svg", encoding="utf-8")
+    source = output.with_suffix(".d2")
+    if existing_source:
+        source.write_text("user-maintained source")
+    before = set(tmp_path.iterdir())
     result = cli(simple_migrations, output, "--d2-binary", "/nonexistent/d2")
     assert result.returncode == 1
-    source = output.with_suffix(".d2")
-    assert source.is_file()
-    assert '"id": "INT"' in source.read_text()
+    assert set(tmp_path.iterdir()) == before
+    if existing_source:
+        assert source.read_text() == "user-maintained source"
+    else:
+        assert not source.exists()
     assert output.read_text() == "old svg"
-    assert f"D2 source retained at {source}" in result.stderr
+    assert "source retained" not in result.stderr
     assert "SVG was not updated" in result.stderr
+
+
+@pytest.mark.parametrize("positional", [False, True], ids=["named", "positional"])
+@pytest.mark.parametrize("existing_source", [False, True])
+def test_svg_output_publishes_only_image_and_cleans_source_workspace(
+    tmp_path, simple_migrations, monkeypatch, capsys, positional, existing_source
+):
+    from erd_generator.cli import main
+
+    output = tmp_path / "输出 图" / "schema.SVG"
+    output.parent.mkdir()
+    companion = output.with_suffix(".d2")
+    if existing_source:
+        companion.write_text("user-maintained source")
+    temporary_sources = []
+
+    def render(schema, source, image, config, **options):
+        assert source.is_file()
+        assert source != companion and source.parent != output.parent
+        assert "shape: sql_table" in source.read_text()
+        assert set(schema) == {"customers", "orders"}
+        # Layout refinement may rewrite its chosen source before publishing.
+        source.write_text("selected layout")
+        image.write_text("rendered SVG")
+        temporary_sources.append(source)
+
+    monkeypatch.setattr("erd_generator.d2_refinement.render_optimized", render)
+    arguments = (
+        [simple_migrations, output]
+        if positional
+        else ["--migrations", simple_migrations, "--out", output]
+    )
+    assert main(list(map(str, arguments))) == 0
+    assert output.read_text() == "rendered SVG"
+    assert temporary_sources and all(not p.parent.exists() for p in temporary_sources)
+    assert set(output.parent.iterdir()) == (
+        {output, companion} if existing_source else {output}
+    )
+    if existing_source:
+        assert companion.read_text() == "user-maintained source"
+    captured = capsys.readouterr()
+    assert str(output) in captured.out
+    assert ".d2" not in captured.out
 
 
 def test_help_shows_explicit_input_and_output():
@@ -191,7 +241,7 @@ def test_help_shows_explicit_input_and_output():
     "render", [False, True], ids=["source-only", "missing-renderer"]
 )
 def test_cross_group_reference_option_reaches_generated_source(tmp_path, render):
-    arguments = input_args(tmp_path, suffix="svg" if render else "d2", positional=True)
+    arguments = input_args(tmp_path, suffix="d2", positional=True)
     config = tmp_path / "layout.yaml"
     config.write_text(
         "groups:\n  parents:\n    tables: [parent]\n  children:\n    tables: [child]\n"
@@ -199,7 +249,7 @@ def test_cross_group_reference_option_reaches_generated_source(tmp_path, render)
     output = tmp_path / "schema.svg"
     if render:
         output.write_text("previous SVG")
-        arguments += ["--d2-binary", "/nonexistent/d2"]
+        arguments += ["--render", "svg", "--d2-binary", "/nonexistent/d2"]
     result = cli(
         *arguments,
         "--layout-config",
