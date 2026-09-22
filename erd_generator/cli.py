@@ -75,7 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--fk-config", help="YAML file containing additional foreign keys"
     )
     parser.add_argument(
-        "--log-dir", help="Root for parse_log/ diagnostics (default: working directory)"
+        "--log-dir",
+        metavar="PATH",
+        help="Also write diagnostics to PATH/parse_log/ (default: terminal only)",
     )
     d2 = parser.add_argument_group("D2 options")
     d2.add_argument(
@@ -174,13 +176,15 @@ def _validate_options(args: argparse.Namespace) -> None:
         )
 
 
-def _write_failure_log(failures: list[ParseFailure], log_root: str | None) -> None:
+def _report_diagnostics(failures: list[ParseFailure], log_root: str | None) -> None:
     if not failures:
         return
     lines = [f"{failure.location}: {failure.reason}" for failure in failures]
     for line in lines:
         print(line, file=sys.stderr)
-    directory = (Path(log_root).expanduser() if log_root else Path.cwd()) / "parse_log"
+    if log_root is None:
+        return
+    directory = Path(log_root).expanduser() / "parse_log"
     directory.mkdir(parents=True, exist_ok=True)
     output = directory / f"parse_failures_{datetime.now():%Y%m%d-%H%M%S-%f}.log"
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -232,7 +236,7 @@ def run_cli(args: argparse.Namespace) -> int:
                         severity="warning",
                     )
                 )
-        _write_failure_log(failures, args.log_dir)
+        _report_diagnostics(failures, args.log_dir)
         if not schema:
             raise ValueError(
                 "no tables detected; check migration input and SQL support"

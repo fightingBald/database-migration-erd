@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -37,14 +38,13 @@ def test_partial_svg_has_visible_notice_real_field_ports_and_no_formal_updates(
             "erd_generator",
             str(migrations),
             str(image),
-            "--log-dir",
-            str(tmp_path),
             "--direction",
             direction,
             "--style",
             style,
         ],
-        cwd=ROOT,
+        cwd=tmp_path,
+        env=dict(os.environ, PYTHONPATH=str(ROOT)),
         capture_output=True,
         text=True,
         timeout=30,
@@ -58,6 +58,9 @@ def test_partial_svg_has_visible_notice_real_field_ports_and_no_formal_updates(
     ]
     assert len(notices) == 1
     assert "Structure not fully verified" in "".join(notices[0].itertext())
+    assert "command output" in "".join(notices[0].itertext())
+    assert "parse_log/" not in "".join(notices[0].itertext())
+    assert not (tmp_path / "parse_log").exists()
     assert notices[0].get("fill") == "#92400E"
     assert "font-size:26px" in notices[0].get("style")
     schema, omissions = preview_schema(load_schema_result(str(migrations)).schema)
