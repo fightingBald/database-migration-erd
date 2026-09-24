@@ -1,6 +1,30 @@
 name: Check ERD generation
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "erd_generator/**"
+      - "tests/**"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "Makefile"
+      - ".github/workflows/check.yml"
+  pull_request:
+    paths:
+      - "erd_generator/**"
+      - "tests/**"
+      - "requirements*.txt"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "Makefile"
+      - ".github/workflows/check.yml"
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

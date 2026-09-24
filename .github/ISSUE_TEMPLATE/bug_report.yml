@@ -1,0 +1,25 @@
+name: Parsing or layout problem
+description: Report a reproducible SQL, rendering or installation problem.
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Versions and environment
+      description: Include migration-erd --version, d2 --version, Python version and operating system.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Command and minimal input
+      description: Include the command, database dialect, and a small fictional SQL example. Remove company data, credentials and private paths. For layout issues, attach the resulting SVG if possible.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+      description: Describe the difference and include relevant terminal errors.
+    validations:
+      required: true

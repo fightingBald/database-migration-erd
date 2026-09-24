@@ -2,17 +2,31 @@ name: Publish project website
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "site/**"
+      - "README.md"
+      - "dev_guide.md"
+      - "pyproject.toml"
+      - "erd_generator/__init__.py"
+      - "tests/unit/test_publication.py"
+      - ".github/workflows/pages.yml"
   push:
     branches: [main]
     paths:
       - "site/**"
+      - "README.md"
+      - "dev_guide.md"
+      - "pyproject.toml"
+      - "erd_generator/__init__.py"
+      - "tests/unit/test_publication.py"
       - ".github/workflows/pages.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -22,8 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: main
           persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Check public URLs and metadata
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q tests/unit/test_publication.py
       - name: Fetch versioned illustration assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -34,10 +56,13 @@ jobs:
           test -s site/assets/layout-after.svg
           test -s site/assets/layout-before.svg
       - uses: actions/configure-pages@v6.0.0
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v5.0.0
+        if: github.event_name != 'pull_request'
         with:
           path: site/
   deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 5
