@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from hashlib import sha256
 
-from .d2_affinity import affinity_ranks, cluster_pairs, group_weights
+from .d2_affinity import affinity_ranks, cluster_pairs, group_weights, packed_ranks
 from .d2_business import BusinessGroup, plan_groups
 from .d2_emit import container_lines, diagram_lines, relationship_lines, table_path
 from .d2_emit import quote_d2 as quote_d2
@@ -64,6 +64,7 @@ def _component_lines(
     inherited_palette: GroupPalette | None = None,
     references: FieldReferences | None = None,
     cluster_affinity: str = "none",
+    cluster_sizes: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     members = set(component.tables)
     metadata = component.relationships if metadata is None else metadata
@@ -118,6 +119,7 @@ def _component_lines(
         if n in owners and owners.get(other) != owners[n]
     }
     weights = {}
+    sizes = {}
     bodies = {}
     paths = {}
     for group in groups:
@@ -207,6 +209,7 @@ def _component_lines(
         size = estimate_size(
             region, schema, show_types, direction, show_indexes=show_indexes
         )
+        sizes[key] = (cluster_sizes or {}).get(group.key, size)
         weights[key] = size[1 if direction in {"right", "left"} else 0]
         bodies[key] = container_lines(
             key, body, label=group.label, palette=palette if group.label else None
@@ -222,7 +225,9 @@ def _component_lines(
     order = {key: i for i, key in enumerate(bodies)}
     if cluster_affinity == "ordered":
         order = affinity_ranks(order, affinity)
-    for key in sorted(bodies, key=lambda key: order[key]):
+    if cluster_affinity == "packed":
+        order = packed_ranks(sizes, affinity, direction)
+    for key in sorted(bodies, key=lambda key: (order[key], key)):
         lines.extend(bodies[key])
     ranks = (
         centered_ranks(
@@ -236,16 +241,15 @@ def _component_lines(
     )
     if ranks and cluster_affinity == "ordered":
         ranks = affinity_ranks(ranks, affinity)
-    lines.extend(
-        relationship_lines(
-            tuple(external),
-            style=style,
-            paths=paths,
-            ranks={name: ranks[owner] for name, owner in owners.items()}
-            if ranks
-            else None,
-        )
+    if ranks and cluster_affinity == "packed":
+        ranks = order
+    relation_body = relationship_lines(
+        tuple(external),
+        style=style,
+        paths=paths,
+        ranks={name: ranks[owner] for name, owner in owners.items()} if ranks else None,
     )
+    lines.extend(relation_body)
     return lines, paths
 
 
@@ -262,6 +266,7 @@ def build_d2(
     show_indexes: bool = True,
     layout_engine: str = "elk",
     cluster_affinity: str = "none",
+    cluster_sizes: dict[str, tuple[float, float]] | None = None,
 ) -> str:
     validate_layout_engine(layout_engine)
     if direction not in {"up", "down", "left", "right"}:
@@ -272,8 +277,8 @@ def build_d2(
         raise ValueError("D2 grouping must be auto or none")
     if layout_strategy not in {"balanced", "compact"}:
         raise ValueError("D2 layout strategy must be balanced or compact")
-    if cluster_affinity not in {"none", "ordered", "paired"}:
-        raise ValueError("D2 cluster affinity must be none, ordered or paired")
+    if cluster_affinity not in {"none", "ordered", "paired", "packed"}:
+        raise ValueError("D2 cluster affinity must be none, ordered, paired or packed")
     if layout_config is not None and not isinstance(layout_config, LayoutConfig):
         raise ValueError("Layout config: expected a LayoutConfig object")
     result = validate_schema(schema)
@@ -322,6 +327,7 @@ def build_d2(
                 compact=layout_strategy == "compact",
                 references=references,
                 cluster_affinity=cluster_affinity if grouping == "auto" else "none",
+                cluster_sizes=cluster_sizes,
             )[0],
             direction,
         )

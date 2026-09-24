@@ -8,7 +8,12 @@ from .artifacts import write_text_atomic
 from .d2 import build_d2
 from .d2_affinity import group_weights
 from .d2_business import plan_groups
-from .d2_geometry import improves_affinity, improves_layout, measure_layout
+from .d2_geometry import (
+    improves_affinity,
+    improves_layout,
+    improves_packing,
+    measure_layout,
+)
 from .d2_renderer import D2RenderConfig, D2RenderError, render_d2
 from .layout_config import LayoutConfig
 from .schema import Schema
@@ -81,7 +86,7 @@ def render_optimized(
 
         attempted = {original}
 
-        def attempt(strategy, mode="none"):
+        def attempt(strategy, mode="none", cluster_sizes=None):
             candidate = build_d2(
                 schema,
                 direction=direction,
@@ -90,6 +95,7 @@ def render_optimized(
                 cluster_affinity=mode,
                 layout_engine=config.layout_engine,
                 show_references=show_references,
+                **({"cluster_sizes": cluster_sizes} if cluster_sizes else {}),
                 **options,
             )
             if candidate in attempted:
@@ -154,6 +160,30 @@ def render_optimized(
                     "D2 layout: %s selected cluster-distance=-%.1f%%",
                     selected,
                     100 * (1 - quality.affinity_distance / reference.affinity_distance),
+                )
+        if affinity and config.layout_engine == "elk" and len(quality.group_sizes) >= 3:
+            # Second-level planning uses the actual sizes of the old winner's
+            # clusters. No grids or synthetic relations cross field boundaries.
+            trial = attempt(
+                strategy,
+                "packed",
+                {key: (width, height) for key, width, height in quality.group_sizes},
+            )
+            if (
+                trial is not None
+                and improves_packing(trial[2], quality)
+                and improves_packing(trial[2], reference)
+            ):
+                LOGGER.info(
+                    "D2 layout: measured cluster packing selected area=-%.1f%%",
+                    100 * (1 - trial[2].area / quality.area),
+                )
+                winner, winning_source, quality = trial
+                selected = f"{strategy}-packed"
+            else:
+                LOGGER.info(
+                    "D2 layout: measured cluster packing did not improve quality; "
+                    "keeping previous layout"
                 )
         if winning_source != original:
             write_text_atomic(source, winning_source)

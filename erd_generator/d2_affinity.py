@@ -4,7 +4,29 @@ from collections import Counter
 from functools import cache
 from itertools import permutations
 
+from .d2_layout import pack_sizes
 from .validation import Relationship
+
+
+def packed_ranks(
+    sizes: dict[str, tuple[float, float]],
+    weights: dict[tuple[str, str], int],
+    direction: str,
+) -> dict[str, int]:
+    """Plan cluster-sized layers; actual field routes remain native ELK edges.
+
+    Rectangle packing balances the cross-axis load, then affinity orders the
+    resulting layers. This is an orientation hint, not fixed coordinates.
+    """
+    horizontal = direction in {"right", "left"}
+    columns = pack_sizes(
+        [
+            ((name,), *(size if horizontal else size[::-1]))
+            for name, size in sizes.items()
+        ]
+    )
+    ranks = {key[0]: rank for rank, column in enumerate(columns) for key in column}
+    return affinity_ranks(ranks, weights)
 
 
 def group_weights(

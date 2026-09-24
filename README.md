@@ -10,7 +10,7 @@ Fictional library schema, generated with default settings. [Download the SVG](ht
 
 - Tables, columns, types, keys and index details below each table.
 - Composite foreign keys, self references and additional relationships from YAML.
-- Automatic grouping, colours and compact layouts.
+- Automatic grouping, colours and layout refinement checked against the rendered SVG.
 - Forward PostgreSQL migrations, including supported dollar-quoted `DO` blocks.
 
 ## Install

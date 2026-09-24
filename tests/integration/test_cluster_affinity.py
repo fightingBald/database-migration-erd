@@ -56,7 +56,7 @@ def clustered_schema():
 @pytest.mark.parametrize(
     "engine", ["elk", pytest.param("tala", marks=pytest.mark.tala)]
 )
-@pytest.mark.parametrize("mode", ["ordered", "paired"])
+@pytest.mark.parametrize("mode", ["ordered", "paired", "packed"])
 @pytest.mark.parametrize("direction,packed", [("right", False), ("down", True)])
 def test_native_candidates_keep_regions_indexes_and_fk_field_endpoints(
     tmp_path, engine, mode, direction, packed
