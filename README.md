@@ -10,14 +10,12 @@ Fictional library schema, generated with default settings. [Download the SVG](ht
 
 - Tables, columns, types, keys and index details below each table.
 - Composite foreign keys, self references and additional relationships from YAML.
-- Automatic grouping, colours and layout refinement checked against the rendered SVG.
+- Automatic grouping, colours and compact cluster layouts.
 - Forward PostgreSQL migrations, including supported dollar-quoted `DO` blocks.
 
 ## Install
 
 Requires **Python 3.11+** and [D2 0.7.1](https://github.com/d2lang/d2/releases/tag/v0.7.1) on PATH.
-
-From the project directory:
 
 ```bash
 python3 -m venv .venv
@@ -33,9 +31,9 @@ Pass the **migration directory** and **output SVG**:
 python -m erd_generator ./migrations ./generated/schema.svg
 ```
 
-Supply the migrations needed to build your schema. The command creates only `schema.svg`; open it in a browser. Grouping, colours and column types are enabled automatically.
+Supply the complete migration history. The command creates only `schema.svg`; open it in a browser. Grouping, colours and column types are enabled by default.
 
-Errors appear in the terminal; no log files are written by default. On SQL/schema errors, the command exits **1**, preserves the existing SVG and, when possible, writes an **INCOMPLETE** `schema.partial.svg` for diagnosis.
+Errors appear in the terminal, with a nonzero exit code and the previous SVG preserved. No log files are written by default.
 
 | Option | Purpose |
 | --- | --- |
@@ -44,4 +42,4 @@ Errors appear in the terminal; no log files are written by default. On SQL/schem
 | `--layout tala` | [Use TALA](dev_guide.md#optional-tala-layout). |
 | `--show-references` | Label cross-group FK targets beside fields. |
 
-Run `python -m erd_generator --help` for all options. See the [developer guide](dev_guide.md) to embed this tool under `tools/erd-generator/`, call it from codegen/CI, or work on the tool itself.
+Run `python -m erd_generator --help` for all options. See the [developer guide](dev_guide.md) for codegen/CI integration under `tools/erd-generator/`, SQL support and development.

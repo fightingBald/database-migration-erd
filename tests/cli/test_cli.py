@@ -188,7 +188,7 @@ def test_svg_failure_cleans_temporary_source_and_preserves_existing_files(
 
 @pytest.mark.parametrize("positional", [False, True], ids=["named", "positional"])
 @pytest.mark.parametrize("existing_source", [False, True])
-def test_svg_output_publishes_only_image_and_cleans_source_workspace(
+def test_svg_output_passes_source_in_memory_without_creating_workspace(
     tmp_path, simple_migrations, monkeypatch, capsys, positional, existing_source
 ):
     from erd_generator.cli import main
@@ -198,17 +198,18 @@ def test_svg_output_publishes_only_image_and_cleans_source_workspace(
     companion = output.with_suffix(".d2")
     if existing_source:
         companion.write_text("user-maintained source")
-    temporary_sources = []
+    sources = []
 
     def render(schema, source, image, config, **options):
-        assert source.is_file()
-        assert source != companion and source.parent != output.parent
-        assert "shape: sql_table" in source.read_text()
+        assert isinstance(source, str)
+        assert "shape: sql_table" in source
+        assert options["source_output"] is None
+        assert set(output.parent.iterdir()) == (
+            {companion} if existing_source else set()
+        )
         assert set(schema) == {"customers", "orders"}
-        # Layout refinement may rewrite its chosen source before publishing.
-        source.write_text("selected layout")
         image.write_text("rendered SVG")
-        temporary_sources.append(source)
+        sources.append(source)
 
     monkeypatch.setattr("erd_generator.d2_refinement.render_optimized", render)
     arguments = (
@@ -218,7 +219,7 @@ def test_svg_output_publishes_only_image_and_cleans_source_workspace(
     )
     assert main(list(map(str, arguments))) == 0
     assert output.read_text() == "rendered SVG"
-    assert temporary_sources and all(not p.parent.exists() for p in temporary_sources)
+    assert sources
     assert set(output.parent.iterdir()) == (
         {output, companion} if existing_source else {output}
     )

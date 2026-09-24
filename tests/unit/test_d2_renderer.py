@@ -1,9 +1,15 @@
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
-from erd_generator.d2_renderer import D2RenderConfig, D2RenderError, render_d2
+from erd_generator.d2_renderer import (
+    D2RenderConfig,
+    D2RenderError,
+    render_d2,
+    render_source,
+)
 
 SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text>x</text></svg>'
@@ -32,8 +38,7 @@ def fake_d2(
             return subprocess.CompletedProcess(argv, 0, elk, "")
         if error:
             raise error
-        Path(argv[-1]).write_text(content, encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, content, "")
 
     monkeypatch.setattr(subprocess, "run", run)
     return calls
@@ -48,8 +53,8 @@ def test_success_uses_elk_argument_array_and_atomic_output(monkeypatch, paths, v
     render_d2(source, output, D2RenderConfig(force_appendix=True))
     argv, kwargs = calls[-1]
     assert argv[argv.index("--layout") + 1] == "elk"
-    assert str(source.resolve()) in argv
-    assert argv[-1] != str(output)
+    assert argv[-2:] == ["-", "-"]
+    assert kwargs["input"] == source.read_text()
     assert "--force-appendix=true" in argv
     assert "D2_LAYOUT" not in kwargs["env"]
     assert "D2_WATCH" not in kwargs["env"]
@@ -57,6 +62,20 @@ def test_success_uses_elk_argument_array_and_atomic_output(monkeypatch, paths, v
     assert not kwargs.get("shell", False)
     assert output.read_text() == SVG
     assert set(output.parent.iterdir()) == {source, output}
+
+
+def test_in_memory_render_never_creates_intermediate_files(monkeypatch, tmp_path):
+    calls = fake_d2(monkeypatch)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Rendering source must not create temporary files or directories")
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", unexpected)
+    monkeypatch.setattr(tempfile, "TemporaryDirectory", unexpected)
+    assert render_source("node -> other\n") == SVG
+    assert calls[-1][0][-2:] == ["-", "-"]
+    assert calls[-1][1]["input"] == "node -> other\n"
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize(
@@ -74,6 +93,22 @@ def test_failed_render_preserves_previous_svg_and_source(monkeypatch, paths, err
     assert "secret SQL payload" not in str(raised.value)
     assert output.read_text() == "old svg"
     assert source.read_text() == "x -> y\n"
+    assert set(output.parent.iterdir()) == {source, output}
+
+
+def test_final_atomic_replace_failure_keeps_old_svg_and_removes_staging(
+    monkeypatch, paths
+):
+    source, output = paths
+    fake_d2(monkeypatch)
+
+    def fail(*args, **kwargs):
+        raise OSError("publication failed")
+
+    monkeypatch.setattr(Path, "replace", fail)
+    with pytest.raises(D2RenderError, match="SVG output failed"):
+        render_d2(source, output)
+    assert output.read_text() == "old svg"
     assert set(output.parent.iterdir()) == {source, output}
 
 

@@ -1,12 +1,8 @@
 # Developer guide
 
-See the [README](README.md) for installation and basic usage; `python -m erd_generator --help` lists all options.
-
 ## Use inside an existing project
 
-Copy `erd_generator/`, `requirements.txt` and `.gitignore` into `tools/erd-generator/`. The Python package contains only runtime code. Exclude `tests/`, `.git/`, virtual environments, caches, local SQL and generated files; `.gitignore` does not filter filesystem copies.
-
-Follow the README installation steps inside that directory. From the parent project's existing codegen script:
+Copy only `erd_generator/`, `requirements.txt` and `.gitignore` into `tools/erd-generator/`. Follow the [README installation steps](README.md#install) there, then call from your existing codegen script:
 
 ```bash
 PYTHONPATH=./tools/erd-generator \
@@ -14,20 +10,18 @@ PYTHONPATH=./tools/erd-generator \
   ./db/migrations ./docs-site/static/img/schema.svg
 ```
 
-Replace the input/output paths and propagate the exit code. D2 0.7.1 must be on PATH. No wrapper or extra build configuration is needed.
+Replace the input/output paths and propagate the exit code. D2 0.7.1 must be on PATH.
 
-The tool's `.gitignore` applies inside its directory. Ignore external outputs in the **parent project's** `.gitignore`:
+Ignore outputs outside the tool directory in the **parent project's** `.gitignore`:
 
 ```gitignore
 /docs-site/static/img/schema.svg
 /docs-site/static/img/schema.partial.svg
 ```
 
-Untrack existing generated files with `git rm --cached -- <generated-path>`.
-
 ## CI and Docusaurus
 
-Install dependencies and D2 → run codegen with the complete migration history → build Docusaurus → deploy. Stop the documentation build if codegen fails; do not publish partial previews. Generated images need no Git commit. Separate build/deploy jobs should pass artifacts from the same successful run.
+Install dependencies and D2 → run codegen → build Docusaurus → deploy. Stop on codegen failure; never publish partial previews. Pass generated images between jobs as artifacts, without committing them to Git.
 
 Reference the generated file under `docs-site/static/img/`:
 
@@ -37,7 +31,7 @@ Reference the generated file under `docs-site/static/img/`:
 [Open full size](/img/schema.svg)
 ```
 
-Check the image URL against the site's configured `baseUrl` before publishing.
+Adjust URLs for the site's `baseUrl`.
 
 ## Relationships without database FK constraints
 
@@ -50,9 +44,7 @@ demo_library.loans:
     - [book_id, demo_library.books, id]
 ```
 
-Each entry is `[local_column, target_table, target_column]`. Composite keys use lists: `[[tenant_id, member_id], demo_library.members, [tenant_id, id]]`.
-
-Tables and columns must exist; short table names must resolve unambiguously. Prefer schema-qualified names. YAML supplements SQL relationships; duplicates are deduplicated. For SQL `REFERENCES table` without target columns, only a single-column primary key can be inferred.
+Entries are `[local_column, target_table, target_column]`; composite keys use lists: `[[tenant_id, member_id], demo_library.members, [tenant_id, id]]`. Tables and columns must exist, and short names must be unambiguous. Duplicates are deduplicated. SQL `REFERENCES table` without target columns can infer only a single-column primary key.
 
 ## Business layout
 
@@ -69,13 +61,11 @@ groups:
     color: gold
 ```
 
-Only `tables` is required. Selectors match exact names before case-sensitive wildcards; unmatched selectors and overlapping groups are errors. Colours: `blue`, `gold`, `green`, `violet`, `slate`, `rose`, `teal`, `orange`. Remaining tables are grouped automatically.
+Only `tables` is required. Exact names take precedence over case-sensitive wildcards; unmatched selectors and overlapping groups are errors. Remaining tables are grouped automatically. Colours: `blue`, `gold`, `green`, `violet`, `slate`, `rose`, `teal`, `orange`.
 
-Use `--grouping none` to disable automatic grouping/refinement while retaining configured groups. `--show-references` labels cross-group FK targets beside fields. `--hide-types` and `--hide-indexes` reduce detail.
+ELK refinement can lay out clusters independently, pack their measured rectangles and route cross-group arrows. It accepts only verified improvements; failures retain native layout. A smaller canvas may have more crossings. Use `--grouping none` to disable automatic grouping/refinement while retaining configured groups.
 
-Layout refinement keeps a candidate only when measured SVG geometry improves without breaking its checks; dense graphs can still have long lines. Implementation: [grouping](erd_generator/d2_business.py), [colour selection](erd_generator/d2_styles.py), [refinement and acceptance checks](erd_generator/d2_refinement.py).
-
-ELK also tries one cluster-level plan using measured region sizes, within a maximum of five renders. It changes ordering and edge orientation while ELK retains field routing; it does not freeze cluster coordinates or put cross-group edges in grids. This candidate requires at least 10% less canvas area, allows at most 3% more total line length, and cannot increase the longest line, longest canvas side or average cluster distance. Failed or worse candidates retain the previous winner. No additional CLI options are required; `--grouping none` disables refinement.
+`--show-references` labels cross-group FK targets beside fields. `--hide-types` and `--hide-indexes` reduce detail.
 
 ## Optional TALA layout
 
@@ -86,17 +76,17 @@ d2 layout tala
 python -m erd_generator ./migrations ./generated/schema.svg --layout tala
 ```
 
-Manage the plugin and any required credentials in your environment. A missing or failing plugin reports an error; it never silently switches engines. Omit `--layout tala` to use ELK.
+A missing or failing plugin reports an error; it never silently switches engines.
 
 ## Explicit D2 source export
 
 `python -m erd_generator ./migrations ./generated/schema.d2` exports source without requiring D2. Add `--render svg` to retain both source and image.
 
-SVG requests use temporary source and leave existing `.d2` files untouched. Scripts that used the former automatic sidecar must request it explicitly. Native D2 Preview can differ from the exported SVG, which also applies rendering options and index-caption alignment. View SVGs in a browser; captions use `foreignObject`, unsupported by some converters.
+Intermediate layouts stay in memory; only final publication uses an atomic staging file. D2 exports contain the native graph, so Preview may differ from the refined SVG. View SVGs in a browser: index captions use `foreignObject`, unsupported by some converters.
 
 ## SQL support and diagnostics
 
-Inputs are UTF-8. `V<number>__description.sql` files use numeric version order; other SQL files use path order. sql-migrate/goose files read only Up sections; `.down.sql` files are skipped. Supply all migrations needed to build the schema.
+Inputs are UTF-8. `V<number>__description.sql` files use numeric version order; other SQL files use path order. sql-migrate/goose files read only Up sections; `.down.sql` files are skipped.
 
 | SQL | Handling |
 | --- | --- |
@@ -108,17 +98,17 @@ Inputs are UTF-8. `V<number>__description.sql` files use numeric version order; 
 | Straight-line `DO` blocks | Apply supported static table/index DDL. |
 | Unsupported conditional/dynamic structural SQL | Report an error, roll back the affected statement/block and continue scanning. |
 
-SQL is never executed. Enums, partitioning, `search_path`, view dependencies and routine/extension side effects are not modeled. Use consistent qualified names; use ordinary DDL or a reviewed snapshot for structures created through unsupported procedural code. No diagnostics does not guarantee complete PostgreSQL interpretation. Python callers parsing separate chunks must share a `SQLParseContext`; `load_schema_result()` manages this automatically.
+SQL is never executed. Enums, partitioning, `search_path`, view dependencies and routine/extension side effects are not modeled. Use qualified names and ordinary DDL or a reviewed snapshot for procedurally created structures. Python callers parsing chunks must share a `SQLParseContext`; `load_schema_result()` manages this automatically.
 
-Diagnostics go to **stderr only** by default. Add `--log-dir PATH` to also save them under `PATH/parse_log/`; `--log-dir .` restores the previous default. Remove an existing `--log-dir` argument from codegen to disable file logging.
+Diagnostics go to **stderr**; `--log-dir PATH` additionally saves them under `PATH/parse_log/`.
 
-On SQL/schema/FK errors, valid content may produce an **INCOMPLETE** `.partial.svg`; formal outputs are preserved and the exit code is **1**. Invalid relationships are omitted, layout overrides are ignored, and files with unclosed quotes/blocks are skipped. No drawable tables means no preview. Each run clears stale partial outputs. Explicit source requests use `.partial.d2`.
+On SQL/schema/FK errors, valid tables may produce an **INCOMPLETE** `.partial.svg` (or `.partial.d2` for source requests). Invalid relationships and layout overrides are omitted; files with unclosed quotes/blocks are skipped. Each run clears stale partial outputs.
 
-Rendering failures also preserve the previous SVG. Check `d2 --version`, `--d2-binary PATH` or `--render-timeout SECONDS` as appropriate. Exit codes: **0** success, **1** generation failure, **2** invalid options. SVG publication is atomic; when both source and SVG are requested, their replacements are separate operations.
+Failures preserve the previous SVG. Exit codes: **0** success, **1** generation failure, **2** invalid options. Source and SVG are published atomically as separate files, not as one transaction.
 
 ## Development
 
-All tests live under `tests/`: `unit/` for modules, `cli/` for command-line/codegen contracts, and `integration/` for real rendering. Shared helpers live in `support/`; SQL fixtures live in `fixtures/`. Test modules import shared helpers, never other test modules.
+Tests live under `tests/{unit,cli,integration}/`, with shared helpers in `tests/support/` and fictional SQL in `tests/fixtures/`. Keep tests and generated files out of the copied runtime.
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -129,9 +119,9 @@ python -m ruff format --check .
 python -m pytest -q -m integration
 ```
 
-CI checks Python 3.11/3.14 and pinned ELK rendering. Integration tests require D2 0.7.1. Optional TALA tests skip when the plugin is absent; run them with `python -m pytest -q -m tala`. Use fictional fixtures and keep generated files out of Git.
+CI checks Python 3.11/3.14. Rendering tests require D2 0.7.1; optional TALA tests skip without the plugin (`python -m pytest -q -m tala`).
 
-Dependency flow: SQL/FK YAML → Schema → D2 source → renderer → SVG. Lower-level modules must not import the CLI.
+Flow: SQL/FK YAML → Schema → D2 → render → optional cluster composition → verified SVG. Lower-level modules must not import the CLI.
 
 | Responsibility | Entry points |
 | --- | --- |
@@ -139,4 +129,5 @@ Dependency flow: SQL/FK YAML → Schema → D2 source → renderer → SVG. Lowe
 | SQL and configuration | [sql_parser.py](erd_generator/sql_parser.py), [fk_config.py](erd_generator/fk_config.py), [layout_config.py](erd_generator/layout_config.py) |
 | Schema and validation | [schema.py](erd_generator/schema.py), [validation.py](erd_generator/validation.py) |
 | Pure D2 generation | [d2.py](erd_generator/d2.py) and its layout/style/serialization helpers |
-| Rendering and refinement | [d2_renderer.py](erd_generator/d2_renderer.py), [d2_refinement.py](erd_generator/d2_refinement.py), [d2_geometry.py](erd_generator/d2_geometry.py), [d2_index_svg.py](erd_generator/d2_index_svg.py) |
+| Rendering and refinement | [d2_renderer.py](erd_generator/d2_renderer.py), [d2_refinement.py](erd_generator/d2_refinement.py), [d2_geometry.py](erd_generator/d2_geometry.py) |
+| SVG composition | [svg_partitions.py](erd_generator/svg_partitions.py), [diagram_packing.py](erd_generator/diagram_packing.py), [diagram_routing.py](erd_generator/diagram_routing.py), [d2_index_svg.py](erd_generator/d2_index_svg.py) |

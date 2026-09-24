@@ -5,12 +5,12 @@ import math
 import os
 import re
 import subprocess
-import tempfile
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
+from .artifacts import write_text_atomic
 from .d2_engines import engine_flags, validate_layout_engine
 from .d2_index_svg import align_index_captions
 
@@ -37,7 +37,13 @@ class D2RenderConfig:
             raise ValueError("D2 executable must not be empty")
 
 
-def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
+def _run(
+    arguments: list[str],
+    config: D2RenderConfig,
+    stage: str,
+    *,
+    source: str | None = None,
+) -> str:
     env = {
         k: v
         for k, v in os.environ.items()
@@ -51,6 +57,7 @@ def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
             check=True,
             timeout=config.timeout,
             env=env,
+            input=source,
         )
     except FileNotFoundError as exc:
         raise D2RenderError(
@@ -77,7 +84,7 @@ def _run(arguments: list[str], config: D2RenderConfig, stage: str) -> str:
         raise D2RenderError(
             f"D2 {stage} could not execute: {exc.strerror or type(exc).__name__}"
         ) from exc
-    return result.stdout.strip()
+    return result.stdout
 
 
 def render_d2(
@@ -89,8 +96,20 @@ def render_d2(
         raise D2RenderError("D2 output must be a separate .svg file")
     if not source.is_file():
         raise D2RenderError(f"D2 source does not exist: {source}")
+    svg = render_source(source.read_text(encoding="utf-8"), config)
+    try:
+        write_text_atomic(output, svg)
+    except OSError as exc:
+        raise D2RenderError(
+            f"D2 SVG output failed: {exc.strerror or type(exc).__name__}"
+        ) from exc
+
+
+def render_source(source: str, config: D2RenderConfig | None = None) -> str:
+    """Render and validate in memory via stdin/stdout; never create a workspace."""
+    config = config or D2RenderConfig()
     started = time.monotonic()
-    version = _run([config.executable, "--version"], config, "version check")
+    version = _run([config.executable, "--version"], config, "version check").strip()
     if version.removeprefix("v") != D2_VERSION:
         raise D2RenderError(
             f"D2 version mismatch: expected {D2_VERSION}, got {version[:80]!r}"
@@ -105,65 +124,46 @@ def render_d2(
         raise D2RenderError(
             "D2 TALA check failed: d2plugin-tala was not recognized; verify with 'd2 layout tala'"
         )
-    temporary = None
+    svg = _run(
+        [
+            config.executable,
+            "--layout",
+            engine,
+            *engine_flags(engine),
+            "--watch=false",
+            "--theme=0",
+            "--dark-theme=-1",
+            "--sketch=false",
+            "--scale=-1",
+            "--pad=100",
+            f"--force-appendix={str(config.force_appendix).lower()}",
+            "--timeout",
+            str(math.ceil(config.timeout)),
+            "-",
+            "-",
+        ],
+        config,
+        "render",
+        source=source,
+    )
     try:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            dir=output.parent, prefix=f".{output.stem}.", suffix=".svg", delete=False
-        ) as handle:
-            temporary = Path(handle.name)
-        _run(
-            [
-                config.executable,
-                "--layout",
-                engine,
-                *engine_flags(engine),
-                "--watch=false",
-                "--theme=0",
-                "--dark-theme=-1",
-                "--sketch=false",
-                "--scale=-1",
-                "--pad=100",
-                f"--force-appendix={str(config.force_appendix).lower()}",
-                "--timeout",
-                str(math.ceil(config.timeout)),
-                str(source),
-                str(temporary),
-            ],
-            config,
-            "render",
-        )
-        try:
-            root = ET.parse(temporary).getroot()
-        except ET.ParseError as exc:
-            raise D2RenderError(
-                "D2 SVG verification failed: output is not valid XML"
-            ) from exc
-        if root.tag != "{http://www.w3.org/2000/svg}svg":
-            raise D2RenderError(
-                "D2 SVG verification failed: output is not an SVG document"
-            )
-        try:
-            svg = temporary.read_text(encoding="utf-8")
-            aligned = align_index_captions(svg)
-        except ValueError as exc:
-            raise D2RenderError(
-                "D2 SVG verification failed: index footer alignment"
-            ) from exc
-        if aligned != svg:
-            temporary.write_text(aligned, encoding="utf-8")
-        temporary.replace(output)
-    except OSError as exc:
+        root = ET.fromstring(svg)
+    except ET.ParseError as exc:
         raise D2RenderError(
-            f"D2 SVG output failed: {exc.strerror or type(exc).__name__}"
+            "D2 SVG verification failed: output is not valid XML"
         ) from exc
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    if root.tag != "{http://www.w3.org/2000/svg}svg":
+        raise D2RenderError("D2 SVG verification failed: output is not an SVG document")
+    try:
+        aligned = align_index_captions(svg)
+    except ValueError as exc:
+        raise D2RenderError(
+            "D2 SVG verification failed: index footer alignment"
+        ) from exc
     LOGGER.info(
-        "D2 render: version=%s layout=%s elapsed=%.3fs output=%s",
+        "D2 render: version=%s layout=%s elapsed=%.3fs",
         version,
         engine,
         time.monotonic() - started,
-        output,
     )
+    return aligned

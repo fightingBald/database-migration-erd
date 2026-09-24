@@ -65,6 +65,7 @@ def _component_lines(
     references: FieldReferences | None = None,
     cluster_affinity: str = "none",
     cluster_sizes: dict[str, tuple[float, float]] | None = None,
+    independent: bool = False,
 ) -> tuple[list[str], dict[str, str]]:
     members = set(component.tables)
     metadata = component.relationships if metadata is None else metadata
@@ -114,7 +115,7 @@ def _component_lines(
     # field reference must also remain outside grid cells.
     linked = {
         owners[n]
-        for f in metadata
+        for f in (component.relationships if independent else metadata)
         for n, other in ((f.table, f.ref_table), (f.ref_table, f.table))
         if n in owners and owners.get(other) != owners[n]
     }
@@ -160,6 +161,7 @@ def _component_lines(
                     metadata=metadata,
                     inherited_palette=palette,
                     references=references,
+                    independent=independent,
                 )
             ranks = (
                 table_ranks(
@@ -253,6 +255,75 @@ def _component_lines(
     return lines, paths
 
 
+def _header_lines(direction: str, style: str, layout_engine: str) -> list[str]:
+    return [
+        "# Generated from migrations; edit SQL or FK configuration, then regenerate.",
+        "vars: {",
+        "  d2-config: {",
+        f"    layout-engine: {layout_engine}",
+        *(CLEAN_CONFIG if style == "clean" else ()),
+        "  }",
+        "}",
+        f"direction: {direction}",
+        "",
+    ]
+
+
+def build_partitioned_d2(
+    schema: Schema,
+    *,
+    show_types: bool = False,
+    direction: str = "right",
+    style: str = "clean",
+    layout_config: LayoutConfig | None = None,
+    show_references: bool = False,
+    show_indexes: bool = True,
+) -> str:
+    """Internal first pass: independent clusters, complete field/FK metadata.
+
+    Boundary arrows are routed after measured placement. This intermediate
+    document is never exported as the user's D2 source.
+    """
+    validation = validate_schema(schema)
+    if validation.errors:
+        raise ValueError("Schema validation failed")
+    groups = plan_groups(schema, validation.relationships, config=layout_config)
+    references = (
+        field_references(
+            schema, validation.relationships, tuple(g.tables for g in groups)
+        )
+        if show_references
+        else None
+    )
+    lines = _header_lines(direction, style, "elk")
+    for i, group in enumerate(groups):
+        members = set(group.tables)
+        component = Component(
+            group.tables,
+            tuple(
+                f
+                for f in validation.relationships
+                if f.table in members and f.ref_table in members
+            ),
+        )
+        body, _ = _component_lines(
+            schema,
+            component,
+            (group,),
+            show_types=show_types,
+            show_indexes=show_indexes,
+            style=style,
+            direction=direction,
+            automatic=True,
+            layered=True,
+            metadata=validation.relationships,
+            references=references,
+            independent=True,
+        )
+        lines.extend(container_lines(f"_erd_partition_{i}", body))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def build_d2(
     schema: Schema,
     *,
@@ -292,17 +363,7 @@ def build_d2(
         if show_references
         else None
     )
-    lines = [
-        "# Generated from migrations; edit SQL or FK configuration, then regenerate.",
-        "vars: {",
-        "  d2-config: {",
-        f"    layout-engine: {layout_engine}",
-        *(CLEAN_CONFIG if style == "clean" else ()),
-        "  }",
-        "}",
-        f"direction: {direction}",
-        "",
-    ]
+    lines = _header_lines(direction, style, layout_engine)
     columns = plan_layout(
         schema,
         result.relationships,

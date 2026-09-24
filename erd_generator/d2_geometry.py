@@ -1,4 +1,4 @@
-"""Read native D2 SVG geometry; never change coordinates or diagram content."""
+"""Verify native and composed SVG geometry without changing diagram content."""
 
 import math
 import re
@@ -11,6 +11,7 @@ from .d2_affinity import group_weights, weighted_distance
 from .d2_business import plan_groups
 from .d2_indexes import FOOTER_STYLE, index_footer
 from .d2_renderer import D2RenderError
+from .diagram_routing import Rect, path_length, segment_clear
 from .layout_config import LayoutConfig
 from .schema import Schema
 from .validation import validate_schema
@@ -30,6 +31,7 @@ class LayoutMetrics:
     crossings: int
     affinity_distance: float = 0
     group_sizes: tuple[tuple[str, float, float], ...] = ()
+    crossing_points: int = 0
 
     @property
     def area(self) -> float:
@@ -40,21 +42,23 @@ class LayoutMetrics:
         return max(self.width, self.height) / min(self.width, self.height)
 
 
-def improves_layout(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool:
-    """Require a material area gain without longer routes or a longer strip.
-
-    Crossings are an orthogonal-segment proxy; tolerate at most 5% (two on
-    small diagrams), rather than treating this approximate measure as exact.
-    """
+def _preserves_geometry(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool:
+    """Bound native layout shape, longest route and approximate crossings."""
     return (
-        candidate.area <= baseline.area * 0.95
-        and max(candidate.width, candidate.height)
-        <= max(baseline.width, baseline.height)
+        max(candidate.width, candidate.height) <= max(baseline.width, baseline.height)
         and candidate.aspect <= max(2.0, baseline.aspect)
-        and candidate.total_length <= baseline.total_length
         and candidate.longest <= baseline.longest
         and candidate.crossings
         <= baseline.crossings + max(2, int(baseline.crossings * 0.05))
+    )
+
+
+def improves_layout(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool:
+    """Require 5% less area without longer routes or a longer strip."""
+    return (
+        candidate.area <= baseline.area * 0.95
+        and candidate.total_length <= baseline.total_length
+        and _preserves_geometry(candidate, baseline)
     )
 
 
@@ -64,13 +68,8 @@ def improves_affinity(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool
         baseline.affinity_distance > 0
         and candidate.affinity_distance <= baseline.affinity_distance * 0.95
         and candidate.area <= baseline.area
-        and max(candidate.width, candidate.height)
-        <= max(baseline.width, baseline.height)
-        and candidate.aspect <= max(2.0, baseline.aspect)
         and candidate.total_length <= baseline.total_length
-        and candidate.longest <= baseline.longest
-        and candidate.crossings
-        <= baseline.crossings + max(2, int(baseline.crossings * 0.05))
+        and _preserves_geometry(candidate, baseline)
     )
 
 
@@ -82,14 +81,34 @@ def improves_packing(candidate: LayoutMetrics, baseline: LayoutMetrics) -> bool:
     """
     return (
         candidate.area <= baseline.area * 0.9
-        and max(candidate.width, candidate.height)
-        <= max(baseline.width, baseline.height)
-        and candidate.aspect <= max(2.0, baseline.aspect)
         and candidate.total_length <= baseline.total_length * 1.03
-        and candidate.longest <= baseline.longest
         and candidate.affinity_distance <= baseline.affinity_distance
-        and candidate.crossings
-        <= baseline.crossings + max(2, int(baseline.crossings * 0.05))
+        and _preserves_geometry(candidate, baseline)
+    )
+
+
+def improves_partitioned(
+    candidate: LayoutMetrics, baseline: LayoutMetrics, arrows: int
+) -> bool:
+    """A major compaction may trade bounded extra crossings for readability.
+
+    Unlike ordering hints, independent placement changes the route topology.
+    Require 25% less area, 10% shorter longest side, no longer longest route,
+    and bounded extra intersections. Shared trunks can put many arrow pairs
+    through one physical crossing, so check both counts rather than conflating
+    them: at most one extra crossing location per four field arrows, with at
+    most two extra intersecting pairs per field arrow.
+    """
+    return (
+        candidate.area <= baseline.area * 0.75
+        and max(candidate.width, candidate.height)
+        <= max(baseline.width, baseline.height) * 0.9
+        and candidate.aspect <= 2
+        and candidate.longest <= baseline.longest
+        and candidate.total_length <= baseline.total_length * 1.1
+        and candidate.crossings <= baseline.crossings + max(4, 2 * arrows)
+        and candidate.crossing_points <= baseline.crossing_points + max(4, arrows // 4)
+        and candidate.affinity_distance <= baseline.affinity_distance * 1.1
     )
 
 
@@ -101,13 +120,13 @@ class Box:
     height: float
 
     @classmethod
-    def read(cls, element: ET.Element) -> "Box":
+    def read(cls, element: ET.Element, offset=(0.0, 0.0)) -> "Box":
         values = tuple(
             float(element.get(k, "nan")) for k in ("x", "y", "width", "height")
         )
         if not all(map(math.isfinite, values)) or min(values[2:]) <= 0:
             raise ValueError("shape dimensions")
-        return cls(*values)
+        return cls(values[0] + offset[0], values[1] + offset[1], *values[2:])
 
     def contains(self, other: "Box", *, heading: float = 0) -> bool:
         return (
@@ -143,8 +162,30 @@ def _no_overlaps(boxes: list[Box]) -> None:
             raise ValueError("overlapping shapes")
 
 
-def _routes(root: ET.Element) -> list[list[tuple[float, float]]]:
+def _offsets(root: ET.Element) -> dict[ET.Element, tuple[float, float]]:
+    """Only composition wrappers translate native diagram coordinates."""
+    result = {}
+
+    def visit(element, offset):
+        if element.get("data-erd-partition") is not None:
+            match = re.fullmatch(
+                r"translate\(([-+\d.eE]+) ([-+\d.eE]+)\)", element.get("transform", "")
+            )
+            if match is None or not all(map(math.isfinite, map(float, match.groups()))):
+                raise ValueError("partition translation")
+            dx, dy = map(float, match.groups())
+            offset = (offset[0] + dx, offset[1] + dy)
+        result[element] = offset
+        for child in element:
+            visit(child, offset)
+
+    visit(root, (0.0, 0.0))
+    return result
+
+
+def svg_routes(root: ET.Element) -> list[list[tuple[float, float]]]:
     routes = []
+    offsets = _offsets(root)
     for path in root.iter(NS + "path"):
         if "connection" not in path.get("class", "").split():
             continue
@@ -160,12 +201,15 @@ def _routes(root: ET.Element) -> list[list[tuple[float, float]]]:
             raise ValueError("unsupported route geometry")
         if bool(path.get("marker-start")) == bool(path.get("marker-end")):
             raise ValueError("arrow direction")
-        points = list(zip(numbers[::2], numbers[1::2], strict=True))
+        dx, dy = offsets[path]
+        points = [
+            (x + dx, y + dy) for x, y in zip(numbers[::2], numbers[1::2], strict=True)
+        ]
         routes.append(points[::-1] if path.get("marker-start") else points)
     return routes
 
 
-def _crossings(routes: list[list[tuple[float, float]]]) -> int:
+def _crossing_counts(routes: list[list[tuple[float, float]]]) -> tuple[int, int]:
     horizontal, vertical = [], []
     for i, route in enumerate(routes):
         for a, b in pairwise(route):
@@ -173,18 +217,22 @@ def _crossings(routes: list[list[tuple[float, float]]]) -> int:
                 horizontal.append((i, min(a[0], b[0]), max(a[0], b[0]), a[1]))
             elif abs(a[0] - b[0]) < 1e-4 and abs(a[1] - b[1]) > 1:
                 vertical.append((i, min(a[1], b[1]), max(a[1], b[1]), a[0]))
-    return len(
-        {
-            (min(i, j), max(i, j), round(x, 2), round(y, 2))
-            for i, left, right, y in horizontal
-            for j, top, bottom, x in vertical
-            if i != j and left + 0.1 < x < right - 0.1 and top + 0.1 < y < bottom - 0.1
-        }
-    )
+    intersections = {
+        (min(i, j), max(i, j), round(x, 2), round(y, 2))
+        for i, left, right, y in horizontal
+        for j, top, bottom, x in vertical
+        if i != j and left + 0.1 < x < right - 0.1 and top + 0.1 < y < bottom - 0.1
+    }
+    return len(intersections), len({(x, y) for _, _, x, y in intersections})
 
 
-def measure_layout(
-    path: Path,
+def measure_layout(path: Path, schema: Schema, **options) -> LayoutMetrics:
+    """File adapter for explicitly saved SVG artifacts."""
+    return measure_svg(path.read_text(encoding="utf-8"), schema, **options)
+
+
+def measure_svg(
+    svg: str,
     schema: Schema,
     *,
     show_types: bool = False,
@@ -194,7 +242,7 @@ def measure_layout(
 ) -> LayoutMetrics:
     try:
         return _measure(
-            ET.parse(path).getroot(),
+            ET.fromstring(svg),
             schema,
             show_types,
             grouping,
@@ -222,6 +270,7 @@ def measure_layout(
                     "business regions",
                     "clipped geometry",
                     "index footer",
+                    "route intersects a table",
                 }
                 else "unexpected SVG structure"
             )
@@ -229,6 +278,11 @@ def measure_layout(
 
 
 def _measure(root, schema, show_types, grouping, config, show_indexes):
+    offsets = _offsets(root)
+
+    def read_box(element):
+        return Box.read(element, offsets[element])
+
     canvas = tuple(map(float, root.get("viewBox", "").split()))
     if len(canvas) != 4 or not all(map(math.isfinite, canvas)) or min(canvas[2:]) <= 0:
         raise ValueError("canvas dimensions")
@@ -255,7 +309,7 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
             if name not in schema or name in boxes:
                 raise ValueError("table membership")
             box = next(r for r in rects if "shape" in r.get("class", "").split())
-            boxes[name], headers[name] = Box.read(box), Box.read(header).height
+            boxes[name], headers[name] = read_box(box), read_box(header).height
             if texts[1::3] != [c.name for c in schema[name].columns] or texts[2::3] != [
                 c.data_type if show_types else "" for c in schema[name].columns
             ]:
@@ -272,13 +326,13 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
                         regions.append(
                             (
                                 "".join("".join(s.itertext()) for s in spans),
-                                Box.read(rectangle),
+                                read_box(rectangle),
                                 label,
                             )
                         )
                 elif texts and texts[0]:
                     regions.append(
-                        (texts[0], Box.read(rectangle), group.find(NS + "text"))
+                        (texts[0], read_box(rectangle), group.find(NS + "text"))
                     )
     if set(boxes) != set(schema):
         raise ValueError("table membership")
@@ -299,7 +353,7 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
         _, i = min(matches)
         _, footprint, label = regions.pop(i)
         content = label.find(f".//{HTML_NS}div[@data-erd-index-footer='true']")
-        label_box = Box.read(label)
+        label_box = read_box(label)
         if (
             content is None
             or content.get("style") != FOOTER_STYLE
@@ -353,7 +407,27 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
         group_sizes.append((group.key, box.width, box.height))
     if regions:
         raise ValueError("business regions")
-    routes = _routes(root)
+    routes = svg_routes(root)
+    boundary_routes = [
+        route
+        for path, route in zip(
+            (
+                p
+                for p in root.iter(NS + "path")
+                if "connection" in p.get("class", "").split()
+            ),
+            routes,
+            strict=True,
+        )
+        if path.get("data-erd-boundary") == "true"
+    ]
+    table_obstacles = [Rect(b.x, b.y, b.width, b.height) for b in boxes.values()]
+    if any(
+        not segment_clear(a, b, table_obstacles)
+        for route in boundary_routes
+        for a, b in pairwise(route)
+    ):
+        raise ValueError("route intersects a table")
     if any(
         not (
             bounds.x <= x <= bounds.x + bounds.width
@@ -396,17 +470,15 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
             if match is None:
                 raise ValueError("field endpoints")
             remaining.pop(match)
-    lengths = [
-        sum(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in pairwise(route))
-        for route in routes
-    ]
+    lengths = [path_length(route) for route in routes]
+    crossings, crossing_points = _crossing_counts(routes)
     return LayoutMetrics(
         canvas[2],
         canvas[3],
         sum(b.width * b.height for b in footprints.values()),
         sum(lengths),
         max(lengths, default=0),
-        _crossings(routes),
+        crossings,
         weighted_distance(
             group_weights(
                 {n: g.key for g in groups for n in g.tables}, validation.relationships
@@ -414,4 +486,5 @@ def _measure(root, schema, show_types, grouping, config, show_indexes):
             centres,
         ),
         tuple(group_sizes),
+        crossing_points,
     )

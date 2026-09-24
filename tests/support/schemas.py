@@ -115,3 +115,44 @@ def uneven_business_schema(topology):
                     ForeignKey(("ref_id",), roots[(group + i) % 6], ("id",))
                 )
     return schema, LayoutConfig(tuple(rules))
+
+
+def externally_linked_schema():
+    """64 dummy tables / 551 columns / 69 FKs, with three external-only families."""
+    schema, groups = {}, []
+    for prefix, count in zip(
+        ("catalog", "archive", "pending", "events", "warehouse", "lending"),
+        (16, 10, 9, 8, 14, 7),
+        strict=True,
+    ):
+        names = [f"demo_fable.{prefix}"] + [
+            f"demo_fable.{prefix}_item_{i:02}" for i in range(1, count)
+        ]
+        groups.append(names)
+        for name in names:
+            fields = 9 if len(schema) < 39 else 8
+            schema[name] = Table(
+                name,
+                columns=[
+                    Column("id", "BIGINT", is_primary_key=True),
+                    Column("parent_id", "BIGINT"),
+                    Column("ref_id", "BIGINT"),
+                    *[Column(f"value_{i}", "TEXT") for i in range(fields - 3)],
+                ],
+            )
+    for group, names in enumerate(groups):
+        for i, name in enumerate(names):
+            if group in (1, 2, 3):
+                target = groups[0][0]
+            elif i:
+                target = names[0]
+            elif group:
+                target = groups[0 if group == 4 else 4][0]
+            else:
+                continue
+            schema[name].foreign_keys.append(
+                ForeignKey(("parent_id",), target, ("id",))
+            )
+    for name in groups[4][1:7]:
+        schema[name].foreign_keys.append(ForeignKey(("ref_id",), groups[5][0], ("id",)))
+    return schema

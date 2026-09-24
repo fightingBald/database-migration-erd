@@ -11,6 +11,7 @@ from erd_generator.d2_geometry import (
     improves_affinity,
     improves_layout,
     improves_packing,
+    improves_partitioned,
 )
 from erd_generator.d2_renderer import D2RenderConfig, D2RenderError
 from erd_generator.layout_config import GroupRule, LayoutConfig
@@ -61,6 +62,23 @@ def test_packing_cannot_replace_an_existing_better_candidate():
     assert not improves_packing(BASE, BETTER)
 
 
+def test_partitioning_requires_major_compaction_and_bounded_routing_tradeoffs():
+    baseline = replace(
+        BASE, width=1000, height=3000, affinity_distance=1000, crossing_points=5
+    )
+    candidate = replace(baseline, width=1400, height=1200, crossing_points=10)
+    assert improves_partitioned(candidate, baseline, 40)
+    for changes in (
+        {"width": 2000},
+        {"longest": 2001},
+        {"total_length": 8900},
+        {"crossing_points": 16},
+        {"crossings": 121},
+        {"affinity_distance": 1101},
+    ):
+        assert not improves_partitioned(replace(candidate, **changes), baseline, 40)
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -85,6 +103,13 @@ def test_affinity_gain_does_not_require_shrinking_the_whole_canvas():
     assert not improves_affinity(BASE, BASE)
 
 
+def render_export(schema, source, output, config=None, **options):
+    """Exercise refinement with an explicitly requested D2 export."""
+    return d2_refinement.render_optimized(
+        schema, source.read_text(), output, config, source_output=source, **options
+    )
+
+
 @pytest.fixture
 def refinement(tmp_path, monkeypatch):
     source, output = tmp_path / "schema.d2", tmp_path / "schema.svg"
@@ -93,26 +118,23 @@ def refinement(tmp_path, monkeypatch):
     schema = {f"t{i}": Table(f"t{i}", columns=[Column("id", "INT")]) for i in range(12)}
     calls = []
 
-    def render(path, target, config):
-        content = path.read_text()
+    def render(content, config):
         calls.append(content)
-        target.write_text(content + " SVG")
+        return content + " SVG"
 
-    monkeypatch.setattr(d2_refinement, "render_d2", render)
+    monkeypatch.setattr(d2_refinement, "render_source", render)
     monkeypatch.setattr(d2_refinement, "build_d2", lambda *a, **kw: "candidate")
     monkeypatch.setattr(
         d2_refinement,
-        "measure_layout",
-        lambda path, *a, **kw: (
-            BETTER if path.read_text().startswith("candidate") else BASE
-        ),
+        "measure_svg",
+        lambda path, *a, **kw: BETTER if path.startswith("candidate") else BASE,
     )
     return schema, source, output, calls
 
 
 def test_publishes_matching_source_and_svg_and_removes_temporary_files(refinement):
     schema, source, output, calls = refinement
-    selected = d2_refinement.render_optimized(schema, source, output)
+    selected = render_export(schema, source, output)
     assert selected == "compact"
     assert calls == ["baseline", "candidate"]
     assert source.read_text() == "candidate"
@@ -132,7 +154,7 @@ def test_candidate_preserves_requested_reference_visibility(
         return "candidate"
 
     monkeypatch.setattr(d2_refinement, "build_d2", candidate)
-    d2_refinement.render_optimized(schema, source, output, show_references=enabled)
+    render_export(schema, source, output, show_references=enabled)
     assert options["show_references"] is enabled
 
 
@@ -149,14 +171,11 @@ def test_candidate_and_verification_preserve_index_visibility(
 
     def measure(path, *args, **kwargs):
         options.append(kwargs["show_indexes"])
-        return BETTER if path.read_text().startswith("candidate") else BASE
+        return BETTER if path.startswith("candidate") else BASE
 
     monkeypatch.setattr(d2_refinement, "build_d2", candidate)
-    monkeypatch.setattr(d2_refinement, "measure_layout", measure)
-    assert (
-        d2_refinement.render_optimized(schema, source, output, show_indexes=enabled)
-        == "compact"
-    )
+    monkeypatch.setattr(d2_refinement, "measure_svg", measure)
+    assert render_export(schema, source, output, show_indexes=enabled) == "compact"
     assert options == [enabled, enabled, enabled]
 
 
@@ -166,29 +185,74 @@ def test_bad_candidate_keeps_successful_baseline(
 ):
     caplog.set_level(logging.INFO)
     schema, source, output, calls = refinement
-    original_render = d2_refinement.render_d2
-    original_measure = d2_refinement.measure_layout
+    original_render = d2_refinement.render_source
+    original_measure = d2_refinement.measure_svg
 
-    def render(path, target, config):
-        if path.read_text() == "candidate" and failure == "render":
+    def render(path, config):
+        if path == "candidate" and failure == "render":
             raise D2RenderError("D2 render failed")
-        return original_render(path, target, config)
+        return original_render(path, config)
 
     def measure(path, *a, **kw):
-        if path.read_text().startswith("candidate"):
+        if path.startswith("candidate"):
             if failure == "verification":
                 raise D2RenderError("D2 layout verification failed: field endpoints")
             return replace(BASE, width=1200)
         return original_measure(path, *a, **kw)
 
-    monkeypatch.setattr(d2_refinement, "render_d2", render)
-    monkeypatch.setattr(d2_refinement, "measure_layout", measure)
-    assert d2_refinement.render_optimized(schema, source, output) == "balanced"
+    monkeypatch.setattr(d2_refinement, "render_source", render)
+    monkeypatch.setattr(d2_refinement, "measure_svg", measure)
+    assert render_export(schema, source, output) == "balanced"
     assert source.read_text() == "baseline"
     assert output.read_text() == "baseline SVG"
     assert "baseline" in caplog.text
     assert len(calls) <= 2
     assert set(source.parent.iterdir()) == {source, output}
+
+
+@pytest.mark.parametrize("failure", [None, "composition", "verification", "quality"])
+def test_partitioning_preserves_native_source_and_falls_back_safely(
+    affinity_refinement, monkeypatch, failure
+):
+    schema, source, output, calls, layout, metrics = affinity_refinement
+    metrics["baseline"] = replace(
+        metrics["baseline"],
+        height=3000,
+        group_sizes=tuple((f"config:g{i}", 200, 1200) for i in range(4)),
+    )
+    metrics["composed"] = replace(
+        metrics["baseline"], width=1200, height=1200, longest=1700
+    )
+    monkeypatch.setattr(
+        d2_refinement, "build_partitioned_d2", lambda *a, **kw: "independent"
+    )
+
+    def compose(*args, **kwargs):
+        if failure == "composition":
+            raise ValueError("cannot compose")
+        return "composed SVG"
+
+    monkeypatch.setattr(d2_refinement, "compose_partitions", compose)
+    measure = d2_refinement.measure_svg
+
+    def verify(image, *args, **kwargs):
+        if image == "composed SVG" and failure == "verification":
+            raise D2RenderError("invalid field endpoint")
+        return measure(image, *args, **kwargs)
+
+    monkeypatch.setattr(d2_refinement, "measure_svg", verify)
+    if failure == "quality":
+        metrics["composed"] = replace(metrics["composed"], longest=4000)
+    selected = render_export(schema, source, output, layout_config=layout)
+    if failure is None:
+        assert selected == "partitioned"
+        assert output.read_text() == "composed SVG"
+        assert source.read_text() == "baseline"
+        assert calls == ["baseline", "independent"]
+    else:
+        assert selected == "compact-paired"
+        assert output.read_text() == "compact:paired SVG"
+    assert set(output.parent.iterdir()) == {source, output}
 
 
 def test_failed_baseline_never_replaces_existing_svg(refinement, monkeypatch):
@@ -197,9 +261,9 @@ def test_failed_baseline_never_replaces_existing_svg(refinement, monkeypatch):
     def fail(*a, **kw):
         raise D2RenderError("D2 render failed")
 
-    monkeypatch.setattr(d2_refinement, "render_d2", fail)
+    monkeypatch.setattr(d2_refinement, "render_source", fail)
     with pytest.raises(D2RenderError):
-        d2_refinement.render_optimized(schema, source, output)
+        render_export(schema, source, output)
     assert source.read_text() == "baseline"
     assert output.read_text() == "previous SVG"
     assert set(source.parent.iterdir()) == {source, output}
@@ -216,7 +280,7 @@ def test_skips_unnecessary_second_render(refinement, monkeypatch, mode):
     if mode == "dense":
         monkeypatch.setattr(
             d2_refinement,
-            "measure_layout",
+            "measure_svg",
             lambda *a, **kw: replace(BASE, table_area=500000),
         )
     if mode == "identical":
@@ -225,9 +289,7 @@ def test_skips_unnecessary_second_render(refinement, monkeypatch, mode):
         options["grouping"] = "none"
     if mode == "appendix":
         options["config"] = D2RenderConfig(force_appendix=True)
-    assert (
-        d2_refinement.render_optimized(schema, source, output, **options) == "balanced"
-    )
+    assert render_export(schema, source, output, **options) == "balanced"
     assert calls == ["baseline"]
 
 
@@ -239,7 +301,7 @@ def test_failed_source_publication_keeps_old_svg(refinement, monkeypatch):
 
     monkeypatch.setattr(d2_refinement, "write_text_atomic", fail)
     with pytest.raises(OSError):
-        d2_refinement.render_optimized(schema, source, output)
+        render_export(schema, source, output)
     assert source.read_text() == "baseline"
     assert output.read_text() == "previous SVG"
 
@@ -247,7 +309,7 @@ def test_failed_source_publication_keeps_old_svg(refinement, monkeypatch):
 def test_rejects_conflicting_output_paths_before_rendering(refinement):
     schema, source, _output, calls = refinement
     with pytest.raises(D2RenderError):
-        d2_refinement.render_optimized(schema, source, source)
+        render_export(schema, source, source)
     assert calls == []
 
 
@@ -259,8 +321,8 @@ def test_unmeasurable_baseline_skips_optional_refinement(
     def fail(*a, **kw):
         raise D2RenderError("D2 layout verification failed: unexpected SVG structure")
 
-    monkeypatch.setattr(d2_refinement, "measure_layout", fail)
-    assert d2_refinement.render_optimized(schema, source, output) == "balanced"
+    monkeypatch.setattr(d2_refinement, "measure_svg", fail)
+    assert render_export(schema, source, output) == "balanced"
     assert calls == ["baseline"]
     assert output.read_text() == "baseline SVG"
     assert "baseline metrics unavailable" in caplog.text
@@ -272,9 +334,9 @@ def test_tala_skips_refinement_without_cross_cluster_links(refinement, monkeypat
     def unexpected(*args, **kwargs):
         pytest.fail("ELK refinement must not run for TALA")
 
-    monkeypatch.setattr(d2_refinement, "measure_layout", unexpected)
+    monkeypatch.setattr(d2_refinement, "measure_svg", unexpected)
     monkeypatch.setattr(d2_refinement, "build_d2", unexpected)
-    selected = d2_refinement.render_optimized(
+    selected = render_export(
         schema, source, output, D2RenderConfig(layout_engine="tala")
     )
     assert calls == ["baseline"]
@@ -318,8 +380,8 @@ def affinity_refinement(refinement, monkeypatch):
     )
     monkeypatch.setattr(
         d2_refinement,
-        "measure_layout",
-        lambda path, *a, **kw: metrics[path.read_text().removesuffix(" SVG")],
+        "measure_svg",
+        lambda path, *a, **kw: metrics[path.removesuffix(" SVG")],
     )
     return schema, source, output, calls, config, metrics
 
@@ -329,7 +391,7 @@ def test_selects_closer_clusters_with_bounded_native_renders(
     affinity_refinement, engine
 ):
     schema, source, output, calls, layout, _ = affinity_refinement
-    selected = d2_refinement.render_optimized(
+    selected = render_export(
         schema,
         source,
         output,
@@ -364,10 +426,7 @@ def test_affinity_compares_against_existing_compact_winner(
         )
         if regression == "distance":
             metrics[name] = replace(metrics[name], **changes)
-    assert (
-        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
-        == "compact"
-    )
+    assert render_export(schema, source, output, layout_config=layout) == "compact"
     assert output.read_text() == "compact:none SVG"
 
 
@@ -376,8 +435,7 @@ def test_candidate_tolerances_cannot_accumulate(affinity_refinement):
     metrics["compact:ordered"] = replace(metrics["compact:ordered"], crossings=42)
     metrics["compact:paired"] = replace(metrics["compact:paired"], crossings=44)
     assert (
-        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
-        == "compact-ordered"
+        render_export(schema, source, output, layout_config=layout) == "compact-ordered"
     )
     assert output.read_text() == "compact:ordered SVG"
 
@@ -389,8 +447,7 @@ def test_packing_cannot_accumulate_crossings_from_affinity(affinity_refinement):
     metrics["compact:paired"] = previous
     metrics["compact:packed"] = replace(previous, width=600, crossings=44)
     assert (
-        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
-        == "compact-paired"
+        render_export(schema, source, output, layout_config=layout) == "compact-paired"
     )
     assert output.read_text() == "compact:paired SVG"
 
@@ -408,8 +465,8 @@ def test_measured_packing_uses_previous_winner_and_keeps_it_on_failure(
     )
     build, render, measure = (
         d2_refinement.build_d2,
-        d2_refinement.render_d2,
-        d2_refinement.measure_layout,
+        d2_refinement.render_source,
+        d2_refinement.measure_svg,
     )
 
     def candidate(*args, **kwargs):
@@ -418,21 +475,19 @@ def test_measured_packing_uses_previous_winner_and_keeps_it_on_failure(
         return build(*args, **kwargs)
 
     def maybe_render(path, *args, **kwargs):
-        if outcome == "render" and path.read_text() == "compact:packed":
+        if outcome == "render" and path == "compact:packed":
             raise D2RenderError("candidate failure")
         return render(path, *args, **kwargs)
 
     def maybe_measure(path, *args, **kwargs):
-        if outcome == "verification" and path.read_text() == "compact:packed SVG":
+        if outcome == "verification" and path == "compact:packed SVG":
             raise D2RenderError("D2 layout verification failed: field endpoints")
         return measure(path, *args, **kwargs)
 
     monkeypatch.setattr(d2_refinement, "build_d2", candidate)
-    monkeypatch.setattr(d2_refinement, "render_d2", maybe_render)
-    monkeypatch.setattr(d2_refinement, "measure_layout", maybe_measure)
-    selected = d2_refinement.render_optimized(
-        schema, source, output, layout_config=layout
-    )
+    monkeypatch.setattr(d2_refinement, "render_source", maybe_render)
+    monkeypatch.setattr(d2_refinement, "measure_svg", maybe_measure)
+    selected = render_export(schema, source, output, layout_config=layout)
     expected = "compact:packed" if outcome == "better" else "compact:paired"
     assert source.read_text() == expected
     assert output.read_text() == expected + " SVG"
@@ -446,18 +501,17 @@ def test_failed_affinity_candidate_keeps_previous_winner(
     affinity_refinement, monkeypatch, failure
 ):
     schema, source, output, _, layout, _ = affinity_refinement
-    name = "render_d2" if failure == "render" else "measure_layout"
+    name = "render_source" if failure == "render" else "measure_svg"
     original = getattr(d2_refinement, name)
 
     def fail(path, *args, **kwargs):
-        if path.read_text().startswith("compact:paired"):
+        if path.startswith("compact:paired"):
             raise D2RenderError("candidate failure")
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(d2_refinement, name, fail)
     assert (
-        d2_refinement.render_optimized(schema, source, output, layout_config=layout)
-        == "compact-ordered"
+        render_export(schema, source, output, layout_config=layout) == "compact-ordered"
     )
     assert output.read_text() == "compact:ordered SVG"
 
@@ -467,7 +521,7 @@ def test_identical_affinity_sources_are_rendered_only_once(
 ):
     schema, source, output, calls, layout, _ = affinity_refinement
     monkeypatch.setattr(d2_refinement, "build_d2", lambda *a, **kw: "compact:ordered")
-    d2_refinement.render_optimized(schema, source, output, layout_config=layout)
+    render_export(schema, source, output, layout_config=layout)
     assert calls == ["baseline", "compact:ordered"]
 
 
@@ -487,7 +541,7 @@ def test_skips_affinity_when_not_applicable(affinity_refinement, disabled):
         schema["t3"].foreign_keys.clear()
         schema["t6"].foreign_keys.clear()
     assert (
-        d2_refinement.render_optimized(
+        render_export(
             schema,
             source,
             output,
