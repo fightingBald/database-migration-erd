@@ -1,3 +1,47 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "migration-erd"
+dynamic = ["version", "dependencies"]
+description = "Readable PostgreSQL ER diagrams from migration SQL, with automatic clustering and no database connection"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "fightingBald"}]
+keywords = ["postgresql", "erd", "sql-migrations", "database-diagram", "d2", "elk"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Documentation",
+]
+
+[project.urls]
+Homepage = "https://fightingbald.github.io/database_migrate_UML_generator/"
+Documentation = "https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md"
+Source = "https://github.com/fightingBald/database_migrate_UML_generator"
+Issues = "https://github.com/fightingBald/database_migrate_UML_generator/issues"
+Changelog = "https://github.com/fightingBald/database_migrate_UML_generator/releases"
+
+[project.scripts]
+migration-erd = "erd_generator.cli:main"
+
+[tool.setuptools]
+packages = ["erd_generator"]
+include-package-data = false
+
+[tool.setuptools.dynamic]
+version = {attr = "erd_generator.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

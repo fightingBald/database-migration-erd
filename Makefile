@@ -3,6 +3,7 @@ PYTHON ?= .venv/bin/python
 .PHONY: build test test-integration lint format
 build:
 	$(PYTHON) -m compileall -q erd_generator
+	$(PYTHON) -m build --no-isolation
 
 test:
 	$(PYTHON) -m pytest -q -m 'not integration'

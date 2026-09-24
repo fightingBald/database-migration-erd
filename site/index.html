@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      Migration ERD — PostgreSQL migration SQL to readable ER diagrams
+    </title>
+    <meta
+      name="description"
+      content="Generate compact SVG ER diagrams from PostgreSQL migration files without a database connection. Automatic table clustering, foreign keys, index details and CI integration."
+    />
+    <meta name="robots" content="index,follow" />
+    <link
+      rel="canonical"
+      href="https://fightingbald.github.io/database_migrate_UML_generator/"
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="Migration ERD — Your migrations, made readable"
+    />
+    <meta
+      property="og:description"
+      content="PostgreSQL migration SQL → automatically grouped SVG diagrams. Local processing, no database connection."
+    />
+    <meta
+      property="og:url"
+      content="https://fightingbald.github.io/database_migrate_UML_generator/"
+    />
+    <meta
+      property="og:image"
+      content="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/layout-after.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="style.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Migration ERD",
+        "applicationCategory": "DeveloperApplication",
+        "softwareVersion": "0.2.0",
+        "softwareRequirements": "Python 3.11+; D2 0.7.1 for SVG rendering",
+        "url": "https://fightingbald.github.io/database_migrate_UML_generator/",
+        "downloadUrl": "https://github.com/fightingBald/database_migrate_UML_generator/releases/tag/v0.2.0",
+        "description": "Generate SVG ER diagrams from PostgreSQL migration SQL with automatic clustering, without a database connection."
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <nav class="wrap" aria-label="Main navigation">
+        <a class="brand" href="./"><span>M↗</span>Migration ERD</a>
+        <div class="nav-links">
+          <a href="#compare">Compare</a><a href="#guides">Guides</a
+          ><a
+            href="https://github.com/fightingBald/database_migrate_UML_generator"
+            >GitHub ↗</a
+          >
+        </div>
+      </nav>
+    </header>
+    <main id="main" class="wrap">
+      <div class="hero">
+        <p class="eyebrow">PostgreSQL · Migrations → SVG</p>
+        <h1>Your migrations.<br /><em>A readable map.</em></h1>
+        <p class="lead">
+          Turn migration SQL into an ER diagram with automatically grouped
+          tables and compact layouts. Run it locally or in CI, without
+          connecting to a database.
+        </p>
+        <div class="actions">
+          <a class="button" href="#install">Start generating</a
+          ><a class="button secondary" href="assets/layout-after.svg"
+            >Explore the SVG ↗</a
+          >
+        </div>
+        <p class="meta">
+          Python 3.11+ · D2 0.7.1 + ELK · Optional TALA · v0.2.0
+        </p>
+        <pre
+          class="command"
+        ><code><span class="comment"># migration directory                 output diagram</span>
+migration-erd ./db/migrations          ./docs/schema.svg</code></pre>
+      </div>
+
+      <section aria-labelledby="layout-title">
+        <p class="eyebrow">A measured example</p>
+        <h2 id="layout-title">Give related tables room to belong.</h2>
+        <p class="section-intro">
+          Clusters are laid out individually, placed using their rendered
+          dimensions, then connected across groups. Geometry checks decide
+          whether to keep the refined result.
+        </p>
+        <div class="stats">
+          <div class="stat">
+            <strong>64 / 6</strong
+            ><span>fictional tables / inferred groups</span>
+          </div>
+          <div class="stat">
+            <strong>40.1%</strong><span>less canvas area in this example</span>
+          </div>
+          <div class="stat">
+            <strong>22.1%</strong><span>shorter longest connection</span>
+          </div>
+        </div>
+        <div class="comparison">
+          <figure class="diagram">
+            <a
+              href="assets/layout-before.svg"
+              aria-label="Open native baseline SVG"
+              ><img
+                src="assets/layout-before.png"
+                alt="Native D2 baseline: a tall central column of related tables creates a stretched canvas"
+                width="1200"
+                height="4131"
+            /></a>
+            <figcaption>
+              <span>Native baseline</span><small>3041 × 10469</small>
+            </figcaption>
+          </figure>
+          <figure class="diagram">
+            <a
+              href="assets/layout-after.svg"
+              aria-label="Open automatically refined SVG"
+              ><img
+                src="assets/layout-after.png"
+                alt="Migration ERD output: six groups packed into a more compact canvas, with all 64 tables and 69 foreign keys retained"
+                width="1800"
+                height="1434"
+            /></a>
+            <figcaption>
+              <span>Automatic refinement</span><small>4894 × 3898</small>
+            </figcaption>
+          </figure>
+        </div>
+        <p class="note">
+          Same fictional input, D2 0.7.1, ELK, default options; no hand-placed
+          tables or layout YAML. This compares our native baseline with our
+          refinement, not with another product. Thumbnails fit their panels. 551
+          columns and 69 FKs are retained. Distinct crossing locations increase
+          from 3 to 12: compactness is a tradeoff, not a promise of fewer
+          crossings.
+          <a href="assets/layout-metrics.json">Full measurements</a> ·
+          <a
+            href="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/dummy-64.sql"
+            >Reproduce with the dummy SQL</a
+          >.
+        </p>
+      </section>
+
+      <section aria-labelledby="features-title">
+        <h2 id="features-title">
+          Built for the schema already in your repository.
+        </h2>
+        <div class="features">
+          <div>
+            <p class="feature-number">01 / READ THE HISTORY</p>
+            <h3>Migration-aware input</h3>
+            <p>
+              Process forward table and index changes, sql-migrate/goose Up
+              sections and supported PostgreSQL DO blocks. SQL is parsed
+              locally, never executed.
+            </p>
+          </div>
+          <div>
+            <p class="feature-number">02 / KEEP THE DETAIL</p>
+            <h3>More than table boxes</h3>
+            <p>
+              Show column types, composite and self-referencing foreign keys,
+              and index descriptions below tables. Supply missing relationships
+              with a small YAML file.
+            </p>
+          </div>
+          <div>
+            <p class="feature-number">03 / FIT THE WORKFLOW</p>
+            <h3>A small codegen step</h3>
+            <p>
+              Produce one SVG by default. Errors return a failing exit code and
+              preserve the previous diagram. Embed the runtime under tools/ or
+              install the CLI package.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="install" aria-labelledby="install-title">
+        <p class="eyebrow">Get started</p>
+        <h2 id="install-title">A directory in. A diagram out.</h2>
+        <p>
+          Install
+          <a href="https://pipx.pypa.io/stable/installation/">pipx</a> with
+          Python 3.11+, and put
+          <a href="https://github.com/d2lang/d2/releases/tag/v0.7.1"
+            >D2 0.7.1</a
+          >
+          on PATH. Then install the versioned wheel:
+        </p>
+        <pre
+          class="command"
+        ><code>pipx install https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/migration_erd-0.2.0-py3-none-any.whl
+migration-erd ./migrations ./schema.svg</code></pre>
+        <p class="note">
+          Open schema.svg in a browser. D2 is a separate renderer dependency. D2
+          source export is explicit; terminal diagnostics do not create log
+          files by default.
+          <a
+            href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md"
+            >Source installation and configuration →</a
+          >
+        </p>
+      </section>
+
+      <section id="compare" aria-labelledby="compare-title">
+        <p class="eyebrow">Choose by workflow</p>
+        <h2 id="compare-title">Where Migration ERD fits.</h2>
+        <p class="section-intro">
+          Different inputs call for different tools. This is a workflow
+          comparison, not a performance ranking.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <caption class="note">
+              Capabilities checked against linked project documentation on 24
+              September 2026.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Tool</th>
+                <th scope="col">Typical starting point</th>
+                <th scope="col">Good fit</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="ours">
+                <td>Migration ERD</td>
+                <td>A directory of PostgreSQL migration SQL</td>
+                <td>
+                  Locally generated SVGs with automatic groups and measured
+                  layout refinement, embedded in codegen or documentation
+                  builds.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="https://github.com/schemaspy/schemaspy">SchemaSpy</a>
+                </td>
+                <td>A database accessed through JDBC</td>
+                <td>
+                  Rich database documentation, schema exploration and reports
+                  across database engines.
+                </td>
+              </tr>
+              <tr>
+                <td><a href="https://github.com/k1LoW/tbls">tbls</a></td>
+                <td>
+                  A database connection or supported schema data, including
+                  offline JSON
+                </td>
+                <td>
+                  CI-friendly database documentation, diagrams, linting and
+                  schema diffs across supported data sources.
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="https://dbml.dbdiagram.io/cli/">DBML / dbdiagram</a>
+                </td>
+                <td>A DBML model or imported SQL structure</td>
+                <td>
+                  Schema modeling and conversion between SQL and DBML, with a
+                  visual design workflow.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">
+          Migration ERD consumes existing SQL migrations; it does not generate
+          or apply migration scripts. A migration tool such as
+          <a href="https://alembic.sqlalchemy.org/en/latest/">Alembic</a> serves
+          a different purpose. Python migration files are not an input format.
+        </p>
+      </section>
+
+      <section id="guides" aria-labelledby="guides-title">
+        <h2 id="guides-title">Take it into your project.</h2>
+        <div class="guides">
+          <a class="guide-card" href="guides/migrations-to-erd.html"
+            ><p class="eyebrow">Guide / 01</p>
+            <h3>PostgreSQL migrations to an ER diagram</h3>
+            <p>
+              Generate a local SVG without running a database, and understand
+              the limits of static parsing. →
+            </p></a
+          ><a class="guide-card" href="guides/ci-docusaurus.html"
+            ><p class="eyebrow">Guide / 02</p>
+            <h3>Keep database diagrams current in CI</h3>
+            <p>
+              Add a codegen step and publish the SVG in Docusaurus without
+              committing generated images. →
+            </p></a
+          >
+        </div>
+      </section>
+
+      <section aria-labelledby="faq-title">
+        <h2 id="faq-title">Before you plug it in.</h2>
+        <details>
+          <summary>Does it connect to a database or upload my SQL?</summary>
+          <p>
+            The generator reads local migration files and invokes the local D2
+            renderer. It does not connect to your database or upload SQL.
+            Installing dependencies requires network access; optional TALA has
+            its own licensing requirements.
+          </p>
+        </details>
+        <details>
+          <summary>Does it understand every PostgreSQL migration?</summary>
+          <p>
+            No. It models supported table, column, constraint and index changes.
+            It skips ERD-neutral setup commands and routine definitions.
+            Arbitrary procedural code, search_path resolution, partition
+            semantics and routine side effects are not modeled. Unsupported
+            structural statements produce diagnostics. Read the
+            <a
+              href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md#sql-support-and-diagnostics"
+              >SQL support contract</a
+            >.
+          </p>
+        </details>
+        <details>
+          <summary>What happens if a migration cannot be parsed?</summary>
+          <p>
+            The command returns a nonzero exit code and preserves the requested
+            SVG. Where possible it writes a separately marked INCOMPLETE partial
+            preview. CI should stop rather than publish that preview.
+          </p>
+        </details>
+        <details>
+          <summary>
+            Can I choose groups or use tables without FK constraints?
+          </summary>
+          <p>
+            Groups are inferred from names and relationships. YAML can override
+            group membership, titles and colours; a separate FK configuration
+            can describe relationships missing from SQL. Tables without
+            relationships are still included.
+          </p>
+        </details>
+      </section>
+    </main>
+    <footer>
+      <div class="wrap">
+        <span>Migration ERD · Built on D2, ELK and SQLGlot.</span
+        ><span
+          ><a
+            href="https://github.com/fightingBald/database_migrate_UML_generator/issues"
+            >Feedback &amp; issues</a
+          >
+          ·
+          <a
+            href="https://github.com/fightingBald/database_migrate_UML_generator/releases"
+            >Releases</a
+          ></span
+        >
+      </div>
+    </footer>
+  </body>
+</html>
