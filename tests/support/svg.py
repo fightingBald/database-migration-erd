@@ -9,8 +9,26 @@ from erd_generator.validation import validate_schema
 NS = "{http://www.w3.org/2000/svg}"
 
 
+def offsets(root):
+    result = {}
+
+    def visit(element, x, y):
+        if element.get("data-erd-partition") is not None:
+            transform = element.get("transform")
+            assert transform.startswith("translate(") and transform.endswith(")")
+            dx, dy = map(float, transform[10:-1].split())
+            x, y = x + dx, y + dy
+        result[element] = (x, y)
+        for child in element:
+            visit(child, x, y)
+
+    visit(root, 0, 0)
+    return result
+
+
 def table_boxes(root):
     boxes = {}
+    shifts = offsets(root)
     for group in root.iter(NS + "g"):
         rects = group.findall(NS + "rect")
         headers = [r for r in rects if "class_header" in r.get("class", "")]
@@ -24,6 +42,8 @@ def table_boxes(root):
             key: float(body.get(key)) for key in ("x", "y", "width", "height")
         }
         boxes[name]["header"] = float(headers[0].get("height"))
+        boxes[name]["x"] += shifts[group][0]
+        boxes[name]["y"] += shifts[group][1]
     return boxes
 
 
@@ -47,11 +67,14 @@ def assert_compact(root, boxes):
 
 def arrow_routes(root):
     routes = []
+    shifts = offsets(root)
     for path in root.iter(NS + "path"):
         if "connection" not in path.get("class", "").split():
             continue
         coords = list(map(float, re.findall(r"-?\d+(?:\.\d+)?", path.get("d"))))
         points = list(zip(coords[::2], coords[1::2], strict=True))
+        dx, dy = shifts[path]
+        points = [(x + dx, y + dy) for x, y in points]
         # Normalize to FK source -> referenced field using the actual arrowhead.
         assert bool(path.get("marker-start")) != bool(path.get("marker-end"))
         if path.get("marker-start"):
@@ -91,6 +114,7 @@ def assert_fk_arrows(schema, root):
 
 def region_boxes(root):
     result = {}
+    shifts = offsets(root)
     for group in root.iter(NS + "g"):
         label = group.find(NS + "text")
         if label is None:
@@ -103,6 +127,8 @@ def region_boxes(root):
             result[text] = {
                 key: float(shape.get(key)) for key in ("x", "y", "width", "height")
             }
+            result[text]["x"] += shifts[group][0]
+            result[text]["y"] += shifts[group][1]
     return result
 
 

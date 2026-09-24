@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from .artifacts import write_text_atomic as _write_source
 from .d2_engines import LAYOUT_ENGINES
@@ -250,8 +248,7 @@ def run_cli(args: argparse.Namespace) -> int:
             else None
         )
 
-        source = build_d2(
-            schema,
+        diagram_options = dict(
             show_types=args.show_types,
             direction=args.direction,
             style=args.style,
@@ -259,8 +256,8 @@ def run_cli(args: argparse.Namespace) -> int:
             layout_config=layout_config,
             show_references=args.show_references,
             show_indexes=args.show_indexes,
-            layout_engine=args.layout,
         )
+        source = build_d2(schema, layout_engine=args.layout, **diagram_options)
         if incomplete:
             from .d2_emit import incomplete_notice
 
@@ -272,46 +269,32 @@ def run_cli(args: argparse.Namespace) -> int:
             len(layout_config.groups) if layout_config else 0,
             args.show_references,
         )
-        with ExitStack() as workspace:
-            if svg_only:
-                source_output.parent.mkdir(parents=True, exist_ok=True)
-                temporary = workspace.enter_context(
-                    TemporaryDirectory(prefix=".erd-source-", dir=source_output.parent)
-                )
-                source_output = Path(temporary) / source_output.name
+        if not svg_only:
             _write_source(source_output, source)
-            if not svg_only:
-                written_source = source_output
-            if args.render:
-                config = D2RenderConfig(
-                    executable=args.d2_binary or "d2",
-                    timeout=args.render_timeout
-                    if args.render_timeout is not None
-                    else 120,
-                    force_appendix=args.force_appendix,
-                    layout_engine=args.layout,
+            written_source = source_output
+        if args.render:
+            config = D2RenderConfig(
+                executable=args.d2_binary or "d2",
+                timeout=args.render_timeout if args.render_timeout is not None else 120,
+                force_appendix=args.force_appendix,
+                layout_engine=args.layout,
+            )
+            if incomplete:
+                from .d2_renderer import render_source
+
+                # Previews keep their warning and use one rendering pass.
+                _write_source(svg_output, render_source(source, config))
+            else:
+                from .d2_refinement import render_optimized
+
+                render_optimized(
+                    schema,
+                    source,
+                    svg_output,
+                    config,
+                    source_output=written_source,
+                    **diagram_options,
                 )
-                if incomplete:
-                    from .d2_renderer import render_d2
-
-                    # Previews keep their warning and use one rendering pass.
-                    render_d2(source_output, svg_output, config)
-                else:
-                    from .d2_refinement import render_optimized
-
-                    render_optimized(
-                        schema,
-                        source_output,
-                        svg_output,
-                        config,
-                        show_types=args.show_types,
-                        direction=args.direction,
-                        style=args.style,
-                        grouping=args.grouping,
-                        layout_config=layout_config,
-                        show_references=args.show_references,
-                        show_indexes=args.show_indexes,
-                    )
         LOGGER.info(
             "ERD %s: tables=%d columns=%d foreign_keys=%d",
             "incomplete preview" if incomplete else "generated",

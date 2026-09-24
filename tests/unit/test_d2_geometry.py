@@ -2,7 +2,7 @@
 
 import pytest
 
-from erd_generator.d2_geometry import measure_layout
+from erd_generator.d2_geometry import measure_layout, measure_svg
 from erd_generator.d2_renderer import D2RenderError
 from erd_generator.layout_config import GroupRule, LayoutConfig
 from erd_generator.schema import Column, ForeignKey, Table
@@ -39,6 +39,45 @@ def test_measures_verified_tables_and_directed_field_routes(diagram):
     assert (metrics.width, metrics.height, metrics.table_area) == (400, 200, 18000)
     assert metrics.total_length == metrics.longest == 111
     assert metrics.crossings == 0
+
+
+def test_composed_coordinates_are_checked_after_translation(diagram):
+    _, schema = diagram
+    translated = SVG.replace(
+        "<g><rect",
+        '<g data-erd-partition="one" transform="translate(10 5)"><g><rect',
+        1,
+    ).replace("</svg>", "</g></svg>")
+    assert measure_svg(translated, schema, show_types=True).total_length == 111
+    with pytest.raises(D2RenderError, match="clipped geometry"):
+        measure_svg(
+            translated.replace("translate(10 5)", "translate(500 5)"),
+            schema,
+            show_types=True,
+        )
+
+
+def test_moving_tables_without_moving_their_arrows_is_rejected(diagram):
+    _, schema = diagram
+    translated = SVG.replace(
+        "<g><rect",
+        '<g data-erd-partition="one" transform="translate(30 0)"><g><rect',
+        1,
+    )
+    translated = translated.replace(
+        '<path class="connection"', '</g><path class="connection"'
+    )
+    with pytest.raises(D2RenderError, match="field endpoints"):
+        measure_svg(translated, schema, show_types=True)
+
+
+def test_boundary_arrow_with_correct_endpoints_must_not_pass_through_a_table(diagram):
+    _, schema = diagram
+    changed = SVG.replace(
+        'class="connection"', 'class="connection" data-erd-boundary="true"'
+    ).replace("M 120 110 L 180 110", "M 120 110 L 60 110 L 60 150 L 180 150 L 180 110")
+    with pytest.raises(D2RenderError, match="route intersects a table"):
+        measure_svg(changed, schema, show_types=True)
 
 
 @pytest.mark.parametrize(

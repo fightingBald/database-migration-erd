@@ -10,9 +10,11 @@ from erd_generator.d2_geometry import (
     improves_affinity,
     improves_layout,
     improves_packing,
-    measure_layout,
+    improves_partitioned,
+    measure_svg,
 )
-from erd_generator.d2_renderer import render_d2
+from erd_generator.d2_renderer import render_source
+from erd_generator.validation import validate_schema
 from tests.support.schemas import business_schema, scenario
 from tests.support.svg import (
     assert_fk_arrows,
@@ -65,29 +67,48 @@ def verify_refinement(
     source.write_text(original)
     measurements, native = {}, {}
 
-    def spy(path, target, config):
-        render_d2(path, target, config)
-        content = path.read_text()
-        root = ET.parse(target).getroot()
+    def spy(content, config):
+        svg = render_source(content, config)
+        root = ET.fromstring(svg)
         boxes = table_boxes(root)
         assert set(boxes) == set(schema)
         assert_no_overlaps(boxes)
-        assert_fk_arrows(schema, root)
         assert_named_regions(root, schema)
+        native[content] = svg
+        if "_erd_partition_0: {" in content:
+            return svg  # Boundary arrows are added by composition, not D2.
+        assert_fk_arrows(schema, root)
         if show_references:
             labels = [
                 "".join(t.itertext())
                 for t in root.iter("{http://www.w3.org/2000/svg}text")
             ]
             assert sum("FK →" in label for label in labels) == 6
-        measurements[content] = measure_layout(target, schema, show_types=True)
-        native[content] = target.read_bytes()
+        measurements[content] = measure_svg(svg, schema, show_types=True)
+        return svg
 
-    monkeypatch.setattr(d2_refinement, "render_d2", spy)
-    selected = d2_refinement.render_optimized(schema, source, image, **options)
+    monkeypatch.setattr(d2_refinement, "render_source", spy)
+    selected = d2_refinement.render_optimized(
+        schema, original, image, source_output=source, **options
+    )
     winner = source.read_text()
-    assert image.read_bytes() == native[winner]
-    assert 1 <= len(native) <= 5
+    if selected == "partitioned":
+        assert winner == original
+        actual = measure_svg(image.read_text(), schema, show_types=True)
+        assert improves_partitioned(
+            actual,
+            measurements[original],
+            sum(len(f.columns) for f in validate_schema(schema).relationships),
+        )
+        root = ET.fromstring(image.read_text())
+        assert_fk_arrows(schema, root)
+        assert_no_overlaps(table_boxes(root))
+        assert_named_regions(root, schema)
+        assert len(native) == 2
+        assert set(tmp_path.iterdir()) == {source, image}
+        return
+    assert image.read_text() == native[winner]
+    assert 1 <= len(native) <= 6
     compact = build_d2(schema, **options, layout_strategy="compact")
     previous = (
         compact
