@@ -156,7 +156,7 @@ Configure [pending Trusted Publishers](https://docs.pypi.org/trusted-publishers/
 
 After CI passes for the release commit, create a matching `v<version>` tag and GitHub Release. Run `gh workflow run publish.yml --ref v<version> -f target=testpypi`, verify installation, then repeat with `target=pypi`. No upload token is stored in the repository. The workflow rejects a tag/version mismatch. Until PyPI is configured, use the wheel attached to the GitHub Release.
 
-`site/` is a static project website. Its illustration files are downloaded from the pinned GitHub Release during `pages.yml`; `site/assets/` and `dist/` stay ignored. Enable GitHub Pages with source **GitHub Actions**. A published Release deploys the site; after website-only changes, run `gh workflow run pages.yml`. Keep asset URLs and measurements together when updating a showcase.
+`site/` is a static project website. Its illustration files are downloaded from the pinned public GitHub Release during `pages.yml`; `site/assets/` and `dist/` stay ignored. Pages deploys website changes pushed to `main`; after publishing a Release, run `gh workflow run pages.yml --ref main`. Keep the Pages environment restricted to `main` and use GitHub Actions as its source. Verify image and package URLs without authentication before linking them in the README; draft Release assets are not public. Keep asset URLs and measurements together when updating a showcase.
 
 Submit `https://fightingbald.github.io/database_migrate_UML_generator/sitemap.xml` in Search Console for the project URL. The site has canonical URLs, descriptive text and crawlable pages; these do not guarantee indexing or AI citations. A project-path `robots.txt` would not control the host's root crawler policy.
 
