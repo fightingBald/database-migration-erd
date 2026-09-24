@@ -75,6 +75,8 @@ Use `--grouping none` to disable automatic grouping/refinement while retaining c
 
 Layout refinement keeps a candidate only when measured SVG geometry improves without breaking its checks; dense graphs can still have long lines. Implementation: [grouping](erd_generator/d2_business.py), [colour selection](erd_generator/d2_styles.py), [refinement and acceptance checks](erd_generator/d2_refinement.py).
 
+ELK also tries one cluster-level plan using measured region sizes, within a maximum of five renders. It changes ordering and edge orientation while ELK retains field routing; it does not freeze cluster coordinates or put cross-group edges in grids. This candidate requires at least 10% less canvas area, allows at most 3% more total line length, and cannot increase the longest line, longest canvas side or average cluster distance. Failed or worse candidates retain the previous winner. No additional CLI options are required; `--grouping none` disables refinement.
+
 ## Optional TALA layout
 
 Install `d2plugin-tala` on PATH using the [upstream setup and licensing instructions](https://github.com/terrastruct/TALA). Tested with D2 0.7.1 and TALA 0.4.3:

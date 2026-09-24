@@ -6,7 +6,12 @@ import pytest
 
 from erd_generator import d2_refinement
 from erd_generator.d2 import build_d2
-from erd_generator.d2_geometry import improves_affinity, improves_layout, measure_layout
+from erd_generator.d2_geometry import (
+    improves_affinity,
+    improves_layout,
+    improves_packing,
+    measure_layout,
+)
 from erd_generator.d2_renderer import render_d2
 from tests.support.schemas import business_schema, scenario
 from tests.support.svg import (
@@ -82,7 +87,7 @@ def verify_refinement(
     selected = d2_refinement.render_optimized(schema, source, image, **options)
     winner = source.read_text()
     assert image.read_bytes() == native[winner]
-    assert 1 <= len(native) <= 4
+    assert 1 <= len(native) <= 5
     compact = build_d2(schema, **options, layout_strategy="compact")
     previous = (
         compact
@@ -90,7 +95,29 @@ def verify_refinement(
         and improves_layout(measurements[compact], measurements[original])
         else original
     )
-    if selected.endswith(("-ordered", "-paired")):
+    if selected.endswith("-packed"):
+        previous_candidates = [
+            content
+            for content in measurements
+            if content != winner
+            and improves_affinity(measurements[content], measurements[previous])
+        ]
+        previous = min(
+            previous_candidates,
+            key=lambda content: measurements[content].affinity_distance,
+            default=previous,
+        )
+        assert improves_packing(measurements[winner], measurements[previous])
+        assert winner == build_d2(
+            schema,
+            **options,
+            layout_strategy=selected.removesuffix("-packed"),
+            cluster_affinity="packed",
+            cluster_sizes={
+                key: (w, h) for key, w, h in measurements[previous].group_sizes
+            },
+        )
+    elif selected.endswith(("-ordered", "-paired")):
         assert improves_affinity(measurements[winner], measurements[previous])
         strategy, mode = selected.split("-")
         assert winner == build_d2(

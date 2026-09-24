@@ -244,20 +244,37 @@ def estimate_size(
 
 def _pack(items: list[tuple[Component, int, int]]) -> tuple[tuple[Component, ...], ...]:
     """Pack estimated rectangles; shared by legacy and business-region planning."""
-    items.sort(key=lambda item: (-item[2], -item[1], item[0].tables))
+    packed = pack_sizes(
+        [(component.tables, width, height) for component, width, height in items]
+    )
+    by_tables = {component.tables: component for component, _, _ in items}
+    return tuple(tuple(by_tables[tables] for tables in column) for column in packed)
+
+
+def pack_sizes(
+    items: list[tuple[tuple[str, ...], float, float]],
+) -> tuple[tuple[tuple[str, ...], ...], ...]:
+    """Pack estimated rectangles into balanced columns.
+
+    The keys may represent tables or already-laid-out business clusters. Keeping
+    this primitive independent from SQL relationships enables the second layout
+    level to treat a cluster as one super-node.
+    """
+    items = list(items)
+    items.sort(key=lambda item: (-item[2], -item[1], item[0]))
     area = sum(width * height for _, width, height in items)
     best_score = math.inf
-    best = ()
+    best: tuple[tuple[tuple[str, ...], ...], ...] = ()
     for count in range(1, len(items) + 1):
-        columns: list[list[Component]] = [[] for _ in range(count)]
+        columns: list[list[tuple[str, ...]]] = [[] for _ in range(count)]
         widths = [0] * count
         heights = [0] * count
         queue = [(0, i) for i in range(count)]
-        for component, width, height in items:
+        for key, width, height in items:
             current_height, index = heapq.heappop(queue)
             heights[index] = current_height + height
             widths[index] = max(widths[index], width)
-            columns[index].append(component)
+            columns[index].append(key)
             heapq.heappush(queue, (heights[index] + GRID_GAP, index))
         width = sum(widths) + GRID_GAP * (count - 1)
         height = max(heights) + 2 * GRID_GAP  # Padding inside invisible columns.
