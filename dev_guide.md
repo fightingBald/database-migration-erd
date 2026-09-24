@@ -93,6 +93,8 @@ Intermediate layouts stay in memory; only final publication uses an atomic stagi
 
 ## SQL support and diagnostics
 
+The project accepts SQL migration files rather than a specific migration framework. Its tokenizer, parser and SQL normalization currently use the PostgreSQL dialect; there is no dialect selector. Common SQL from other databases can be compatible, but that is not a guarantee for their complete migration syntax. MySQL backtick-quoted DDL and SQL Server bracket-quoted DDL with `GO` fail in current checks. SQLite-style `CREATE TABLE` can parse, but SQLite-specific migration behavior is not fully validated. ORM migration source code must first be exported to SQL.
+
 Inputs are UTF-8. `V<number>__description.sql` files use numeric version order; other SQL files use path order. sql-migrate/goose files read only Up sections; `.down.sql` files are skipped.
 
 | SQL | Handling |
@@ -128,7 +130,7 @@ python -m build
 python -m twine check --strict dist/*
 ```
 
-CI checks Python 3.11/3.14. Rendering tests require D2 0.7.1; optional TALA tests skip without the plugin (`python -m pytest -q -m tala`).
+Code CI checks Python 3.11/3.14 on Linux for runtime, test and build changes. Documentation and website edits use the lighter publication checks in `pages.yml`; the full check can also be run manually. Rendering tests require D2 0.7.1; optional TALA tests skip without the plugin (`python -m pytest -q -m tala`).
 
 Flow: SQL/FK YAML → Schema → D2 → render → optional cluster composition → verified SVG. Lower-level modules must not import the CLI.
 
@@ -150,14 +152,14 @@ Configure [pending Trusted Publishers](https://docs.pypi.org/trusted-publishers/
 | Field | Value |
 | --- | --- |
 | Project | `migration-erd` |
-| GitHub owner / repository | `fightingBald` / `database_migrate_UML_generator` |
+| GitHub owner / repository | `fightingBald` / `database-migration-erd` |
 | Workflow | `publish.yml` |
 | Environment | `pypi` or `testpypi`, matching the index |
 
 After CI passes for the release commit, create a matching `v<version>` tag and GitHub Release. Run `gh workflow run publish.yml --ref v<version> -f target=testpypi`, verify installation, then repeat with `target=pypi`. No upload token is stored in the repository. The workflow rejects a tag/version mismatch. Until PyPI is configured, use the wheel attached to the GitHub Release.
 
-`site/` is a static project website. Its illustration files are downloaded from the pinned public GitHub Release during `pages.yml`; `site/assets/` and `dist/` stay ignored. Pages deploys website changes pushed to `main`; after publishing a Release, run `gh workflow run pages.yml --ref main`. Keep the Pages environment restricted to `main` and use GitHub Actions as its source. Verify image and package URLs without authentication before linking them in the README; draft Release assets are not public. Keep asset URLs and measurements together when updating a showcase.
+`site/` is a static project website. `pages.yml` checks canonical URLs, internal links and download metadata on PRs, and deploys changes pushed to `main`. Illustrations are downloaded from the pinned public Release; `site/assets/` and `dist/` stay ignored. After publishing a Release, run `gh workflow run pages.yml --ref main`. Keep the Pages environment restricted to `main` and use GitHub Actions as its source. Publish and verify image/package URLs without authentication before merging README links; draft assets are not public. Keep showcase measurements pinned to the version that generated them.
 
-Submit `https://fightingbald.github.io/database_migrate_UML_generator/sitemap.xml` in Search Console for the project URL. The site has canonical URLs, descriptive text and crawlable pages; these do not guarantee indexing or AI citations. A project-path `robots.txt` would not control the host's root crawler policy.
+Submit `https://fightingbald.github.io/database-migration-erd/sitemap.xml` in Search Console for the project URL. The site has canonical URLs, descriptive text and crawlable pages; these do not guarantee indexing or AI citations. A project-path `robots.txt` would not control the host's root crawler policy.
 
 To roll back the website, revert the site change and rerun `pages.yml`. Published package versions are immutable: fix forward with a new version, or pin consumers to the last working version. Leave existing release assets intact so documentation links remain stable.

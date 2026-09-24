@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "migration-erd"
 dynamic = ["version", "dependencies"]
-description = "Readable PostgreSQL ER diagrams from migration SQL, with automatic clustering and no database connection"
+description = "Readable ER diagrams from database migration SQL, with automatic clustering and no database connection"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "fightingBald"}]
@@ -25,11 +25,11 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://fightingbald.github.io/database_migrate_UML_generator/"
-Documentation = "https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md"
-Source = "https://github.com/fightingBald/database_migrate_UML_generator"
-Issues = "https://github.com/fightingBald/database_migrate_UML_generator/issues"
-Changelog = "https://github.com/fightingBald/database_migrate_UML_generator/releases"
+Homepage = "https://fightingbald.github.io/database-migration-erd/"
+Documentation = "https://github.com/fightingBald/database-migration-erd/blob/main/dev_guide.md"
+Source = "https://github.com/fightingBald/database-migration-erd"
+Issues = "https://github.com/fightingBald/database-migration-erd/issues"
+Changelog = "https://github.com/fightingBald/database-migration-erd/releases"
 
 [project.scripts]
 migration-erd = "erd_generator.cli:main"

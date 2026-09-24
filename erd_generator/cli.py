@@ -23,7 +23,10 @@ LOGGER = logging.getLogger(__name__)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate readable PostgreSQL ER diagrams from migrations, without a database connection",
+        description=(
+            "Generate readable ER diagrams from migration SQL, without a database "
+            "connection (PostgreSQL dialect parser)"
+        ),
         allow_abbrev=False,
         usage="%(prog)s SQL_DIR OUTPUT [options]",
         formatter_class=argparse.RawDescriptionHelpFormatter,

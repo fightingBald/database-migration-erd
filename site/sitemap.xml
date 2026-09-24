@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://fightingbald.github.io/database_migrate_UML_generator/</loc></url>
-  <url><loc>https://fightingbald.github.io/database_migrate_UML_generator/guides/migrations-to-erd.html</loc></url>
-  <url><loc>https://fightingbald.github.io/database_migrate_UML_generator/guides/ci-docusaurus.html</loc></url>
+  <url><loc>https://fightingbald.github.io/database-migration-erd/</loc></url>
+  <url><loc>https://fightingbald.github.io/database-migration-erd/guides/migrations-to-erd.html</loc></url>
+  <url><loc>https://fightingbald.github.io/database-migration-erd/guides/ci-docusaurus.html</loc></url>
 </urlset>

@@ -4,33 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>
-      Migration ERD — PostgreSQL migration SQL to readable ER diagrams
+      Database Migration ERD — SQL migrations to readable ER diagrams
     </title>
     <meta
       name="description"
-      content="Generate compact SVG ER diagrams from PostgreSQL migration files without a database connection. Automatic table clustering, foreign keys, index details and CI integration."
+      content="Generate compact SVG ER diagrams from database migration SQL without a database connection. Automatic clustering, foreign keys, index details and CI integration."
     />
     <meta name="robots" content="index,follow" />
     <link
       rel="canonical"
-      href="https://fightingbald.github.io/database_migrate_UML_generator/"
+      href="https://fightingbald.github.io/database-migration-erd/"
     />
     <meta property="og:type" content="website" />
     <meta
       property="og:title"
-      content="Migration ERD — Your migrations, made readable"
+      content="Database Migration ERD — Your migrations, made readable"
     />
     <meta
       property="og:description"
-      content="PostgreSQL migration SQL → automatically grouped SVG diagrams. Local processing, no database connection."
+      content="Database migration SQL → automatically grouped SVG diagrams. Local processing, no database connection."
     />
     <meta
       property="og:url"
-      content="https://fightingbald.github.io/database_migrate_UML_generator/"
+      content="https://fightingbald.github.io/database-migration-erd/"
     />
     <meta
       property="og:image"
-      content="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/layout-after.png"
+      content="https://github.com/fightingBald/database-migration-erd/releases/download/v0.2.0/layout-after.png"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="stylesheet" href="style.css" />
@@ -38,13 +38,13 @@
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "name": "Migration ERD",
+        "name": "Database Migration ERD",
         "applicationCategory": "DeveloperApplication",
-        "softwareVersion": "0.2.0",
+        "softwareVersion": "0.2.1",
         "softwareRequirements": "Python 3.11+; D2 0.7.1 for SVG rendering",
-        "url": "https://fightingbald.github.io/database_migrate_UML_generator/",
-        "downloadUrl": "https://github.com/fightingBald/database_migrate_UML_generator/releases/tag/v0.2.0",
-        "description": "Generate SVG ER diagrams from PostgreSQL migration SQL with automatic clustering, without a database connection."
+        "url": "https://fightingbald.github.io/database-migration-erd/",
+        "downloadUrl": "https://github.com/fightingBald/database-migration-erd/releases/tag/v0.2.1",
+        "description": "Generate SVG ER diagrams from database migration SQL with automatic clustering, without a database connection."
       }
     </script>
   </head>
@@ -52,11 +52,10 @@
     <a class="skip" href="#main">Skip to content</a>
     <header>
       <nav class="wrap" aria-label="Main navigation">
-        <a class="brand" href="./"><span>M↗</span>Migration ERD</a>
+        <a class="brand" href="./"><span>M↗</span>Database Migration ERD</a>
         <div class="nav-links">
           <a href="#compare">Compare</a><a href="#guides">Guides</a
-          ><a
-            href="https://github.com/fightingBald/database_migrate_UML_generator"
+          ><a href="https://github.com/fightingBald/database-migration-erd"
             >GitHub ↗</a
           >
         </div>
@@ -64,8 +63,8 @@
     </header>
     <main id="main" class="wrap">
       <div class="hero">
-        <p class="eyebrow">PostgreSQL · Migrations → SVG</p>
-        <h1>Your migrations.<br /><em>A readable map.</em></h1>
+        <p class="eyebrow">SQL migrations → SVG</p>
+        <h1>SQL migrations.<br /><em>Readable ER diagrams.</em></h1>
         <p class="lead">
           Turn migration SQL into an ER diagram with automatically grouped
           tables and compact layouts. Run it locally or in CI, without
@@ -78,7 +77,13 @@
           >
         </div>
         <p class="meta">
-          Python 3.11+ · D2 0.7.1 + ELK · Optional TALA · v0.2.0
+          Python 3.11+ · D2 0.7.1 + ELK · Optional TALA · v0.2.1
+        </p>
+        <p class="note">
+          Currently uses a PostgreSQL dialect parser. Compatible SQL from other
+          databases may work; complete support for other dialects is not
+          verified.
+          <a href="#sql-support">Check SQL compatibility →</a>
         </p>
         <pre
           class="command"
@@ -127,7 +132,7 @@ migration-erd ./db/migrations          ./docs/schema.svg</code></pre>
               aria-label="Open automatically refined SVG"
               ><img
                 src="assets/layout-after.png"
-                alt="Migration ERD output: six groups packed into a more compact canvas, with all 64 tables and 69 foreign keys retained"
+                alt="Database Migration ERD output: six groups packed into a more compact canvas, with all 64 tables and 69 foreign keys retained"
                 width="1800"
                 height="1434"
             /></a>
@@ -145,7 +150,7 @@ migration-erd ./db/migrations          ./docs/schema.svg</code></pre>
           crossings.
           <a href="assets/layout-metrics.json">Full measurements</a> ·
           <a
-            href="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/dummy-64.sql"
+            href="https://github.com/fightingBald/database-migration-erd/releases/download/v0.2.0/dummy-64.sql"
             >Reproduce with the dummy SQL</a
           >.
         </p>
@@ -200,14 +205,14 @@ migration-erd ./db/migrations          ./docs/schema.svg</code></pre>
         </p>
         <pre
           class="command"
-        ><code>pipx install https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/migration_erd-0.2.0-py3-none-any.whl
+        ><code>pipx install https://github.com/fightingBald/database-migration-erd/releases/download/v0.2.1/migration_erd-0.2.1-py3-none-any.whl
 migration-erd ./migrations ./schema.svg</code></pre>
         <p class="note">
           Open schema.svg in a browser. D2 is a separate renderer dependency. D2
           source export is explicit; terminal diagnostics do not create log
           files by default.
           <a
-            href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md"
+            href="https://github.com/fightingBald/database-migration-erd/blob/main/dev_guide.md"
             >Source installation and configuration →</a
           >
         </p>
@@ -215,7 +220,7 @@ migration-erd ./migrations ./schema.svg</code></pre>
 
       <section id="compare" aria-labelledby="compare-title">
         <p class="eyebrow">Choose by workflow</p>
-        <h2 id="compare-title">Where Migration ERD fits.</h2>
+        <h2 id="compare-title">Where Database Migration ERD fits.</h2>
         <p class="section-intro">
           Different inputs call for different tools. This is a workflow
           comparison, not a performance ranking.
@@ -235,8 +240,10 @@ migration-erd ./migrations ./schema.svg</code></pre>
             </thead>
             <tbody>
               <tr class="ours">
-                <td>Migration ERD</td>
-                <td>A directory of PostgreSQL migration SQL</td>
+                <td>Database Migration ERD</td>
+                <td>
+                  SQL migration files, read with a PostgreSQL dialect parser
+                </td>
                 <td>
                   Locally generated SVGs with automatic groups and measured
                   layout refinement, embedded in codegen or documentation
@@ -278,8 +285,8 @@ migration-erd ./migrations ./schema.svg</code></pre>
           </table>
         </div>
         <p class="note">
-          Migration ERD consumes existing SQL migrations; it does not generate
-          or apply migration scripts. A migration tool such as
+          Database Migration ERD consumes existing SQL migrations; it does not
+          generate or apply migration scripts. A migration tool such as
           <a href="https://alembic.sqlalchemy.org/en/latest/">Alembic</a> serves
           a different purpose. Python migration files are not an input format.
         </p>
@@ -317,16 +324,25 @@ migration-erd ./migrations ./schema.svg</code></pre>
             its own licensing requirements.
           </p>
         </details>
-        <details>
-          <summary>Does it understand every PostgreSQL migration?</summary>
+        <details id="sql-support">
+          <summary>
+            Which databases and migration formats are supported?
+          </summary>
           <p>
-            No. It models supported table, column, constraint and index changes.
-            It skips ERD-neutral setup commands and routine definitions.
-            Arbitrary procedural code, search_path resolution, partition
-            semantics and routine side effects are not modeled. Unsupported
-            structural statements produce diagnostics. Read the
+            Input is SQL files, including sql-migrate and goose Up sections, not
+            Python or other ORM migration source code. The parser currently uses
+            the PostgreSQL dialect. Compatible SQL from other databases may
+            work, but complete MySQL, SQLite and SQL Server migration support is
+            not verified. There is no dialect selector.
+          </p>
+          <p>
+            It models supported table, column, constraint and index changes. It
+            skips ERD-neutral setup commands and routine definitions. Arbitrary
+            procedural code, search_path resolution, partition semantics and
+            routine side effects are not modeled. Unsupported structural
+            statements produce diagnostics. Read the
             <a
-              href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md#sql-support-and-diagnostics"
+              href="https://github.com/fightingBald/database-migration-erd/blob/main/dev_guide.md#sql-support-and-diagnostics"
               >SQL support contract</a
             >.
           </p>
@@ -354,15 +370,15 @@ migration-erd ./migrations ./schema.svg</code></pre>
     </main>
     <footer>
       <div class="wrap">
-        <span>Migration ERD · Built on D2, ELK and SQLGlot.</span
+        <span>Database Migration ERD · Built on D2, ELK and SQLGlot.</span
         ><span
           ><a
-            href="https://github.com/fightingBald/database_migrate_UML_generator/issues"
+            href="https://github.com/fightingBald/database-migration-erd/issues"
             >Feedback &amp; issues</a
           >
           ·
           <a
-            href="https://github.com/fightingBald/database_migrate_UML_generator/releases"
+            href="https://github.com/fightingBald/database-migration-erd/releases"
             >Releases</a
           ></span
         >
