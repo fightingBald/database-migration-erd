@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      Generate PostgreSQL ER diagrams from migration files without a database —
+      Migration ERD
+    </title>
+    <meta
+      name="description"
+      content="Turn a directory of PostgreSQL migration SQL into an SVG ER diagram locally. Learn how automatic clustering works and when static migration parsing is the right fit."
+    />
+    <meta name="robots" content="index,follow" />
+    <link
+      rel="canonical"
+      href="https://fightingbald.github.io/database_migrate_UML_generator/guides/migrations-to-erd.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta
+      property="og:title"
+      content="PostgreSQL migrations to an ER diagram, without a database"
+    />
+    <meta
+      property="og:description"
+      content="Local SQL parsing, automatic table groups and a reproducible 64-table layout example."
+    />
+    <meta
+      property="og:url"
+      content="https://fightingbald.github.io/database_migrate_UML_generator/guides/migrations-to-erd.html"
+    />
+    <meta
+      property="og:image"
+      content="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/layout-after.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <nav class="wrap" aria-label="Main navigation">
+        <a class="brand" href="../"><span>M↗</span>Migration ERD</a>
+        <div class="nav-links">
+          <a href="../#compare">Compare</a><a href="../#guides">Guides</a
+          ><a
+            href="https://github.com/fightingBald/database_migrate_UML_generator"
+            >GitHub ↗</a
+          >
+        </div>
+      </nav>
+    </header>
+    <main id="main" class="wrap article">
+      <p class="eyebrow">Guide / 01 · PostgreSQL documentation</p>
+      <h1>Generate an ER diagram from migrations, without a database.</h1>
+      <p class="lead">
+        Your repository already describes how the schema was built. Migration
+        ERD reads that SQL history and turns the supported structure into a
+        diagram.
+      </p>
+      <p>
+        This workflow is useful when you want documentation in a pull request, a
+        local overview of an unfamiliar schema, or a CI-generated image without
+        provisioning a database. Everything is processed locally; no database
+        credentials are needed.
+      </p>
+      <h2>Start with the complete SQL history</h2>
+      <p>
+        Install the CLI and D2 using the
+        <a href="../#install">installation instructions</a>. Then point the tool
+        at your migration directory and the output SVG:
+      </p>
+      <pre
+        class="command"
+      ><code>migration-erd ./db/migrations ./docs/schema.svg</code></pre>
+      <p>
+        Open the SVG in a browser. Types and index descriptions are visible by
+        default. The command does not leave a D2 sidecar or a directory of
+        candidate diagrams.
+      </p>
+      <p>
+        Versioned <code>V&lt;number&gt;__description.sql</code> files use
+        numeric order; other SQL files use path order. sql-migrate and goose Up
+        sections are supported, and <code>.down.sql</code> files are skipped.
+        Include the migrations needed to create the tables before altering or
+        referencing them.
+      </p>
+      <h2>Try the published 64-table example</h2>
+      <p>
+        The release contains a fictional schema with 551 columns, 69 foreign
+        keys and six name-based families. Run these commands in an empty working
+        directory:
+      </p>
+      <pre class="command"><code>mkdir -p migrations
+curl --fail --location \
+  https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/dummy-64.sql \
+  --output migrations/V1__dummy.sql
+migration-erd ./migrations ./schema.svg</code></pre>
+      <p>
+        No layout configuration is needed. The
+        <a href="../#layout-title">published comparison</a> shows the same input
+        rendered as a native D2 baseline and through the tool's default
+        refinement. This particular canvas is 40.1% smaller and its longest
+        connection is 22.1% shorter. Results depend on the schema; the
+        refinement also permits a bounded increase in crossings.
+      </p>
+      <h2>How related tables stay together</h2>
+      <p>
+        Table names and FK relationships suggest groups. D2 and ELK lay out
+        tables, then the tool evaluates candidate arrangements using actual SVG
+        dimensions. For eligible stretched diagrams, it lays out groups
+        independently, packs their rectangles and routes cross-group connections
+        around tables and other groups.
+      </p>
+      <p>
+        Validation checks table membership, fields, index captions, foreign-key
+        endpoints, overlap and clipping. A candidate must meet the quality
+        thresholds before replacing the native result. You can override groups
+        and colours with <code>--layout-config</code>, or add missing
+        relationships with <code>--fk-config</code>.
+      </p>
+      <h2>Choose the right source of truth</h2>
+      <p>
+        This is static parsing, not a PostgreSQL execution engine. Straight-line
+        supported DDL in dollar-quoted DO blocks can be modeled; arbitrary
+        loops, dynamic structural SQL, search_path semantics and routine side
+        effects cannot. Views are outside the table-and-FK diagram. Routine
+        definitions and supported administrative commands are skipped.
+      </p>
+      <p>
+        If your schema is mostly created through procedural code, use a reviewed
+        ordinary-DDL snapshot or a tool that inspects the resulting database. If
+        your migrations are Python or another programming language, provide SQL
+        rather than those source files. See the
+        <a
+          href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md#sql-support-and-diagnostics"
+          >supported SQL and diagnostics</a
+        >
+        before integrating.
+      </p>
+      <p>
+        When parsing fails, the command exits nonzero and preserves the
+        requested SVG. A separate INCOMPLETE preview may help diagnosis. It
+        should never be treated as the authoritative schema.
+      </p>
+      <p>
+        <a href="ci-docusaurus.html"
+          >Next: automatically update database diagrams in CI and Docusaurus
+          →</a
+        >
+      </p>
+    </main>
+    <footer>
+      <div class="wrap">
+        <span>Written by the Migration ERD project · 24 September 2026</span
+        ><a
+          href="https://github.com/fightingBald/database_migrate_UML_generator/issues"
+          >Share a reproducible issue</a
+        >
+      </div>
+    </footer>
+  </body>
+</html>

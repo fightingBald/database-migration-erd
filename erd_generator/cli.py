@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from . import __version__
 from .artifacts import write_text_atomic as _write_source
 from .d2_engines import LAYOUT_ENGINES
 from .d2_renderer import D2RenderConfig, D2RenderError
@@ -22,7 +23,7 @@ LOGGER = logging.getLogger(__name__)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate D2 ERDs from migration SQL with ELK or TALA",
+        description="Generate readable PostgreSQL ER diagrams from migrations, without a database connection",
         allow_abbrev=False,
         usage="%(prog)s SQL_DIR OUTPUT [options]",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -34,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
             "require the D2 executable. Short-form defaults: types shown, clean\n"
             "style, ELK layout. Named paths: --migrations SQL_DIR --out OUTPUT."
         ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"migration-erd {__version__}"
     )
     parser.add_argument(
         "sql_dir",

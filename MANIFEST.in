@@ -1,0 +1,3 @@
+global-exclude *
+recursive-include erd_generator *.py
+include pyproject.toml MANIFEST.in README.md requirements.txt

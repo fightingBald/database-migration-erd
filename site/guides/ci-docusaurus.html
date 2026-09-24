@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      Automatically update database diagrams in CI and Docusaurus — Migration
+      ERD
+    </title>
+    <meta
+      name="description"
+      content="Add PostgreSQL ER diagram generation to codegen and CI. Publish SVGs in Docusaurus without committing generated images or connecting to a database."
+    />
+    <meta name="robots" content="index,follow" />
+    <link
+      rel="canonical"
+      href="https://fightingbald.github.io/database_migrate_UML_generator/guides/ci-docusaurus.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta
+      property="og:title"
+      content="Database diagrams in CI and Docusaurus"
+    />
+    <meta
+      property="og:description"
+      content="Generate an SVG during the documentation build and deploy it as an artifact."
+    />
+    <meta
+      property="og:url"
+      content="https://fightingbald.github.io/database_migrate_UML_generator/guides/ci-docusaurus.html"
+    />
+    <meta
+      property="og:image"
+      content="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/layout-after.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="../style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header>
+      <nav class="wrap" aria-label="Main navigation">
+        <a class="brand" href="../"><span>M↗</span>Migration ERD</a>
+        <div class="nav-links">
+          <a href="../#compare">Compare</a><a href="../#guides">Guides</a
+          ><a
+            href="https://github.com/fightingBald/database_migrate_UML_generator"
+            >GitHub ↗</a
+          >
+        </div>
+      </nav>
+    </header>
+    <main id="main" class="wrap article">
+      <p class="eyebrow">Guide / 02 · Codegen &amp; CI</p>
+      <h1>Keep database diagrams current with your documentation.</h1>
+      <p class="lead">
+        Generate the image during the build, then deploy it with the docs. The
+        SVG does not need to be committed to Git.
+      </p>
+      <h2>Add one step to codegen</h2>
+      <p>
+        Install the <a href="../#install">versioned CLI package</a> and D2 0.7.1
+        in your build environment. From the root of your project, add this
+        command before the documentation build:
+      </p>
+      <pre
+        class="command"
+      ><code>migration-erd ./db/migrations ./docs-site/static/img/schema.svg</code></pre>
+      <p>
+        Use the complete migration history. No database container, database
+        credentials or SQL execution is needed for supported migrations. Keep
+        the CLI version and D2 version pinned so upgrades are intentional.
+      </p>
+      <p>
+        If you prefer to keep the runtime under
+        <code>tools/erd-generator/</code>, copy <code>erd_generator/</code>,
+        <code>requirements.txt</code> and <code>.gitignore</code>. Install the
+        Python dependencies in that tool's environment, then call it from the
+        existing script:
+      </p>
+      <pre class="command"><code>PYTHONPATH=./tools/erd-generator \
+  ./tools/erd-generator/.venv/bin/python -m erd_generator \
+  ./db/migrations ./docs-site/static/img/schema.svg</code></pre>
+      <h2>Reference the SVG in Docusaurus</h2>
+      <p>
+        Docusaurus copies files from <code>static/</code> into the built site's
+        root. In a Markdown document, add:
+      </p>
+      <pre class="command"><code>![Database schema](/img/schema.svg)
+
+[Open full-size diagram](/img/schema.svg)</code></pre>
+      <p>
+        Check the deployed URL against your site's <code>baseUrl</code>. For JSX
+        references, follow Docusaurus's
+        <a href="https://docusaurus.io/docs/static-assets"
+          >static asset and base URL guidance</a
+        >. View SVGs in a browser; some image converters do not support the HTML
+        index captions inside the SVG.
+      </p>
+      <h2>Generate, then build, then deploy</h2>
+      <p>
+        After checkout and dependency installation, the relevant part of a
+        GitHub Actions job can be:
+      </p>
+      <pre class="command"><code>- name: Generate the database diagram
+  run: migration-erd ./db/migrations ./docs-site/static/img/schema.svg
+
+- name: Build the documentation
+  working-directory: docs-site
+  run: npm run build</code></pre>
+      <p>
+        This snippet assumes the CLI, D2 and your site's Node dependencies are
+        already installed. Deploy the resulting documentation build using your
+        existing deployment job. If build and deploy run in different jobs,
+        transfer artifacts from the same successful run.
+      </p>
+      <p>
+        Do not use <code>continue-on-error</code> on the generation step. Errors
+        return exit code 1 and preserve the previous requested SVG; an
+        INCOMPLETE partial preview may also be produced. A failed generation
+        should stop publication, preventing an old or incomplete diagram from
+        being presented as current.
+      </p>
+      <h2>Keep generated files out of source control</h2>
+      <p>
+        Put these entries in the parent project's <code>.gitignore</code>; the
+        tool's own ignore file does not cover output paths elsewhere in your
+        repository:
+      </p>
+      <pre class="command"><code>/docs-site/static/img/schema.svg
+/docs-site/static/img/schema.partial.svg</code></pre>
+      <p>
+        Diagnostics go to the terminal by default. Use
+        <code>--log-dir</code> only when you intentionally want diagnostic files
+        as CI artifacts. A full configuration reference is in the
+        <a
+          href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md"
+          >developer guide</a
+        >.
+      </p>
+      <p>
+        <a href="../#compare">Compare the database documentation workflows →</a>
+      </p>
+    </main>
+    <footer>
+      <div class="wrap">
+        <span>Written by the Migration ERD project · 24 September 2026</span
+        ><a
+          href="https://github.com/fightingBald/database_migrate_UML_generator/issues"
+          >Feedback &amp; issues</a
+        >
+      </div>
+    </footer>
+  </body>
+</html>
