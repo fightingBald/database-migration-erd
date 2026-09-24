@@ -32,6 +32,7 @@ __pycache__/
 
 # Generated diagrams, diagnostics and retired presentation assets.
 /generated/
+/site/assets/
 /parse_log/
 *.partial.d2
 *.partial.svg

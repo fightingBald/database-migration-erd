@@ -1,3 +1,7 @@
 -r requirements.txt
 pytest==9.1.1
 ruff==0.16.6
+build==1.6.1
+setuptools==84.0.0
+pip==26.2.1
+twine==7.0.0

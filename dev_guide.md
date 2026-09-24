@@ -2,7 +2,14 @@
 
 ## Use inside an existing project
 
-Copy only `erd_generator/`, `requirements.txt` and `.gitignore` into `tools/erd-generator/`. Follow the [README installation steps](README.md#install) there, then call from your existing codegen script:
+Copy only `erd_generator/`, `requirements.txt` and `.gitignore` into `tools/erd-generator/`. From that directory, create an environment and install dependencies:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+From the parent project, call from your existing codegen script:
 
 ```bash
 PYTHONPATH=./tools/erd-generator \
@@ -117,6 +124,8 @@ python -m pytest -q -m 'not integration'
 python -m ruff check .
 python -m ruff format --check .
 python -m pytest -q -m integration
+python -m build
+python -m twine check --strict dist/*
 ```
 
 CI checks Python 3.11/3.14. Rendering tests require D2 0.7.1; optional TALA tests skip without the plugin (`python -m pytest -q -m tala`).
@@ -131,3 +140,24 @@ Flow: SQL/FK YAML → Schema → D2 → render → optional cluster composition 
 | Pure D2 generation | [d2.py](erd_generator/d2.py) and its layout/style/serialization helpers |
 | Rendering and refinement | [d2_renderer.py](erd_generator/d2_renderer.py), [d2_refinement.py](erd_generator/d2_refinement.py), [d2_geometry.py](erd_generator/d2_geometry.py) |
 | SVG composition | [svg_partitions.py](erd_generator/svg_partitions.py), [diagram_packing.py](erd_generator/diagram_packing.py), [diagram_routing.py](erd_generator/diagram_routing.py), [d2_index_svg.py](erd_generator/d2_index_svg.py) |
+
+## Publishing
+
+The distribution name and CLI are `migration-erd`; the import package remains `erd_generator`. Version lives in `erd_generator/__init__.py`. Runtime dependencies come from `requirements.txt`; package tests build the sdist and wheel and exercise an installed command outside the checkout. Install a development checkout with `python -m pip install -e .`.
+
+Configure [pending Trusted Publishers](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/) in your PyPI and TestPyPI accounts:
+
+| Field | Value |
+| --- | --- |
+| Project | `migration-erd` |
+| GitHub owner / repository | `fightingBald` / `database_migrate_UML_generator` |
+| Workflow | `publish.yml` |
+| Environment | `pypi` or `testpypi`, matching the index |
+
+After CI passes for the release commit, create a matching `v<version>` tag and GitHub Release. Run `gh workflow run publish.yml --ref v<version> -f target=testpypi`, verify installation, then repeat with `target=pypi`. No upload token is stored in the repository. The workflow rejects a tag/version mismatch. Until PyPI is configured, use the wheel attached to the GitHub Release.
+
+`site/` is a static project website. Its illustration files are downloaded from the pinned GitHub Release during `pages.yml`; `site/assets/` and `dist/` stay ignored. Enable GitHub Pages with source **GitHub Actions**. A published Release deploys the site; after website-only changes, run `gh workflow run pages.yml`. Keep asset URLs and measurements together when updating a showcase.
+
+Submit `https://fightingbald.github.io/database_migrate_UML_generator/sitemap.xml` in Search Console for the project URL. The site has canonical URLs, descriptive text and crawlable pages; these do not guarantee indexing or AI citations. A project-path `robots.txt` would not control the host's root crawler policy.
+
+To roll back the website, revert the site change and rerun `pages.yml`. Published package versions are immutable: fix forward with a new version, or pin consumers to the last working version. Leave existing release assets intact so documentation links remain stable.

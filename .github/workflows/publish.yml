@@ -1,0 +1,72 @@
+name: Publish Python package
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Package index (run TestPyPI first)
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Verify the release tag
+        run: |
+          python - <<'PY'
+          import os
+          from erd_generator import __version__
+          if os.environ['GITHUB_REF'] != f'refs/tags/v{__version__}':
+              raise SystemExit('Run this workflow against the tag matching the package version')
+          PY
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Verify package and CLI contracts
+        run: |
+          python -m pytest -q -m 'not integration'
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: Build and validate distributions
+        run: |
+          python -m build
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: ${{ inputs.target }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: python-distributions
+          path: dist/
+      - name: Publish to TestPyPI
+        if: inputs.target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Publish to PyPI
+        if: inputs.target == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
