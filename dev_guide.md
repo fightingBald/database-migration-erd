@@ -130,7 +130,7 @@ python -m build
 python -m twine check --strict dist/*
 ```
 
-Code CI checks Python 3.11/3.14 on Linux for runtime, test and build changes. Documentation and website edits use the lighter publication checks in `pages.yml`; the full check can also be run manually. Rendering tests require D2 0.7.1; optional TALA tests skip without the plugin (`python -m pytest -q -m tala`).
+Code CI runs once on Python 3.11/Linux for runtime, test and build changes. Documentation and website edits use the lighter publication checks in `pages.yml`; the full check can also be run manually. Rendering tests require D2 0.7.1; optional TALA tests skip without the plugin (`python -m pytest -q -m tala`).
 
 Flow: SQL/FK YAML → Schema → D2 → render → optional cluster composition → verified SVG. Lower-level modules must not import the CLI.
 
