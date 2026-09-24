@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from erd_generator import __version__
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -37,7 +39,15 @@ def test_distributions_include_runtime_and_exclude_local_data(distribution):
             archive.read(next(p for p in paths if p.endswith("/METADATA")))
         )
         assert metadata["Name"] == "migration-erd"
+        assert metadata["Version"] == __version__
         assert metadata["Requires-Python"] == ">=3.11"
+        urls = dict(value.split(", ", 1) for value in metadata.get_all("Project-URL"))
+        assert (
+            urls["Homepage"] == "https://fightingbald.github.io/database-migration-erd/"
+        )
+        assert (
+            urls["Source"] == "https://github.com/fightingBald/database-migration-erd"
+        )
         assert set(metadata.get_all("Requires-Dist")) == set(
             (ROOT / "requirements.txt").read_text().splitlines()
         )
@@ -87,7 +97,7 @@ def test_installed_command_works_outside_checkout(distribution, tmp_path):
 
     version = run("--version")
     assert version.returncode == 0, version.stderr
-    assert version.stdout.startswith("migration-erd ")
+    assert version.stdout.strip() == f"migration-erd {__version__}"
     migrations = tmp_path / "migrations"
     migrations.mkdir()
     (migrations / "001.sql").write_text("CREATE TABLE books(id int PRIMARY KEY);")

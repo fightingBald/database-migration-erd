@@ -371,7 +371,9 @@ footer .wrap {
   }
   nav {
     min-height: 76px;
-    gap: 16px;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 16px 0;
   }
   .nav-links {
     gap: 15px;
@@ -379,6 +381,7 @@ footer .wrap {
   }
   .brand {
     font-size: 17px;
+    flex-basis: 100%;
   }
   .brand span {
     display: none;

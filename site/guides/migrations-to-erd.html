@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>
       Generate PostgreSQL ER diagrams from migration files without a database —
-      Migration ERD
+      Database Migration ERD
     </title>
     <meta
       name="description"
@@ -14,7 +14,7 @@
     <meta name="robots" content="index,follow" />
     <link
       rel="canonical"
-      href="https://fightingbald.github.io/database_migrate_UML_generator/guides/migrations-to-erd.html"
+      href="https://fightingbald.github.io/database-migration-erd/guides/migrations-to-erd.html"
     />
     <meta property="og:type" content="article" />
     <meta
@@ -27,11 +27,11 @@
     />
     <meta
       property="og:url"
-      content="https://fightingbald.github.io/database_migrate_UML_generator/guides/migrations-to-erd.html"
+      content="https://fightingbald.github.io/database-migration-erd/guides/migrations-to-erd.html"
     />
     <meta
       property="og:image"
-      content="https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/layout-after.png"
+      content="https://github.com/fightingBald/database-migration-erd/releases/download/v0.2.0/layout-after.png"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="stylesheet" href="../style.css" />
@@ -40,11 +40,10 @@
     <a class="skip" href="#main">Skip to content</a>
     <header>
       <nav class="wrap" aria-label="Main navigation">
-        <a class="brand" href="../"><span>M↗</span>Migration ERD</a>
+        <a class="brand" href="../"><span>M↗</span>Database Migration ERD</a>
         <div class="nav-links">
           <a href="../#compare">Compare</a><a href="../#guides">Guides</a
-          ><a
-            href="https://github.com/fightingBald/database_migrate_UML_generator"
+          ><a href="https://github.com/fightingBald/database-migration-erd"
             >GitHub ↗</a
           >
         </div>
@@ -54,9 +53,9 @@
       <p class="eyebrow">Guide / 01 · PostgreSQL documentation</p>
       <h1>Generate an ER diagram from migrations, without a database.</h1>
       <p class="lead">
-        Your repository already describes how the schema was built. Migration
-        ERD reads that SQL history and turns the supported structure into a
-        diagram.
+        Your repository already describes how the schema was built. Database
+        Migration ERD reads that SQL history and turns the supported structure
+        into a diagram.
       </p>
       <p>
         This workflow is useful when you want documentation in a pull request, a
@@ -65,6 +64,12 @@
         credentials are needed.
       </p>
       <h2>Start with the complete SQL history</h2>
+      <p>
+        This guide uses PostgreSQL-compatible SQL. The current parser uses that
+        dialect; accepting common SQL from another database does not imply full
+        support for its migration syntax. Check the
+        <a href="../#sql-support">SQL compatibility notes</a> first.
+      </p>
       <p>
         Install the CLI and D2 using the
         <a href="../#install">installation instructions</a>. Then point the tool
@@ -93,7 +98,7 @@
       </p>
       <pre class="command"><code>mkdir -p migrations
 curl --fail --location \
-  https://github.com/fightingBald/database_migrate_UML_generator/releases/download/v0.2.0/dummy-64.sql \
+  https://github.com/fightingBald/database-migration-erd/releases/download/v0.2.0/dummy-64.sql \
   --output migrations/V1__dummy.sql
 migration-erd ./migrations ./schema.svg</code></pre>
       <p>
@@ -133,7 +138,7 @@ migration-erd ./migrations ./schema.svg</code></pre>
         your migrations are Python or another programming language, provide SQL
         rather than those source files. See the
         <a
-          href="https://github.com/fightingBald/database_migrate_UML_generator/blob/main/dev_guide.md#sql-support-and-diagnostics"
+          href="https://github.com/fightingBald/database-migration-erd/blob/main/dev_guide.md#sql-support-and-diagnostics"
           >supported SQL and diagnostics</a
         >
         before integrating.
@@ -152,9 +157,10 @@ migration-erd ./migrations ./schema.svg</code></pre>
     </main>
     <footer>
       <div class="wrap">
-        <span>Written by the Migration ERD project · 24 September 2026</span
-        ><a
-          href="https://github.com/fightingBald/database_migrate_UML_generator/issues"
+        <span
+          >Written by the Database Migration ERD project · 24 September
+          2026</span
+        ><a href="https://github.com/fightingBald/database-migration-erd/issues"
           >Share a reproducible issue</a
         >
       </div>
